@@ -1,4 +1,4 @@
-PROJ := agglayer
+PROJ := aggregation-layer
 
 ifeq ($(OS),Windows_NT)
 	OPEN := start

@@ -3,18 +3,36 @@
 
 \usepackage{graphicx}
 \usepackage{amsmath}
+\usepackage{amssymb}
 \usepackage{listings}
 \usepackage{xcolor}
 \usepackage{accsupp}
 \usepackage[utf8]{inputenc}
 \usepackage{tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
 \usepackage{pgfplots}
 \pgfplotsset{compat=1.18}
 
 %\usepackage[margin=0.75in]{geometry}
 \usepackage{authblk}
 \usepackage{url}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\algblockdefx[EVENT]{Event}{EndEvent}%
+  [1]{\textbf{on event}\ \texttt{#1}\ \algorithmicdo}%
+  {\algorithmicend\ \textbf{on}}
+\algblockdefx[MESSAGE]{Message}{EndMessage}%
+  [2][msg]{\textbf{upon message}\ <\texttt{#1}\ |\ #2>\ \algorithmicdo}%
+  {\algorithmicend\ \textbf{upon}}
+\MakeRobust{\Call} % for nested Calls
 
+
+\tikzset{
+    block/.style={rectangle, draw, text centered, minimum height=2em, minimum width=5cm},
+    triangle/.style={regular polygon, regular polygon sides=3, draw, minimum size=3cm},
+    arrow/.style={-{Latex}},
+    labelstyle/.style={font=\normalsize},
+}
 
 \lstset{
     showstringspaces=false,
@@ -131,15 +149,62 @@ After every addition batch, the root of the aggregation layer is certified by th
 
 The Aggregation Layer implements an append-only authenticated dictionary data structure.
 
-It authenticates incoming state transfer certification requests by verifying if the sender is in possession of the private key of the keypair the current token owner is identified with. Specific protocol details are out of scope of this paper.
+\begin{figure}[!htbp]
+    \centering
+\begin{tikzpicture}[node distance=2cm and 2cm]
 
-Authenticated requests are processed by batches. At the end of each batch, the Aggregation Layer produces its summary root hash and sends it to the Consensus Layer for certification. A certification request includes: 1) previous state root hash, 2) new state root hash, 3) consistency proof of the changes made during the batch, 4) authenticator identifying the operator.
+    % Nodes
+    \node[block] (consensus) {Consensus Layer};
+    %\node[block, below=of consensus] (triangle) {}; % dummy node for triangle placement
+    \node[triangle, below=of consensus] (triangle) {SMT};
+    \node[block, below=of triangle] (users) {Token Users};
 
-Consensus layer certifies the request only if it uniquely \textit{extends} a previous non-certified state root hash, and the consistency proof is valid.
+    % Arrows
+    \draw[arrow] ([xshift=-0.1cm]triangle.north) -- ++(0,1) node[labelstyle, left] {$(r_i, r_{i-1}, \pi)$} -- ([xshift=-0.1cm]consensus.south);
+    \draw[arrow] ([xshift=0.1cm]consensus.south) -- node[labelstyle, right] {$c = (r_i, r_{i-1}; s_{\textsf{cl}})$} ([xshift=0.1cm]triangle.north);
+    \draw[arrow] ([xshift=-0.4cm]users.north) -- node[labelstyle, left] {$B = (k_1, k_2, \ldots, k_j)$} ([xshift=-0.4cm]triangle.south);
+    \draw[arrow] ([xshift=0.4cm]triangle.south) -- ++(0,-1) node[labelstyle, right] {
+            $\substack{
+                \pi^{\textsf{inc}}_{k \in \{B_1, \dots, B_i\}} = (v_k \leadsto r, c) \\
+                \pi^{\overline{\textsf {inc}}}_{k \notin \{B_1, \dots, B_i\}} = (\varnothing_k \leadsto r, c)
+            }$
+            } -- ([xshift=0.4cm]users.north);
+
+\end{tikzpicture}
+    \caption{The Security Model of Aggregation Layer}\label{fig:model}
+\end{figure}
+
+It authenticates incoming state transfer certification requests by verifying if the sender is in possession of the private key of the key-pair the current token owner is identified with. Specific protocol details are out of scope of this paper.
+
+Authenticated requests are processed by batches $B_i$. At the end of each batch, the Aggregation Layer produces its summary root hash $r_i$ and sends it to the Consensus Layer for certification. A certification request $(r_i, r_{i-1}, \pi)$ includes: 1) previous state root hash, 2) new state root hash, 3) consistency proof of the changes made during the batch, 4) authenticator identifying the operator.
+
+Consensus layer certifies the request only if it uniquely \textit{extends} a previous non-certified state root hash, and the consistency proof is valid. It returns a certificate $c = (r_i, r_{i-1}; s_{\textsf{cl}})$, where $s_{\textsf{cl}}$ is the signature of the Consensus Layer (group signature of the consensus nodes, or proof of inclusion in a block).
 
 One state can be extended only once---this guarantees that the entire aggregation layer is not forked.
 
 The next round extends the newly certified state, and so on.
+
+We model the Consensus Layer as an oracle, see Algorithm~\ref{alg:consensuslayer}.
+
+\begin{algorithm}[tb]
+  \caption{Consensus Layer modeled as an oracle}\label{alg:consensuslayer}
+  \begin{algorithmic}[0]
+    \Function{Initialize}{\null}
+        \State $r_- \gets \bot$
+        \State $i \gets 0$
+    \EndFunction
+    \Function{CertificationRequest}{$(r_i, r_{i-1}, \pi)$}
+        \If {$(r_{i-1} \ne  r_-) \lor \lnot\Call{valid}{\pi, r_i, r_{i-1}}$}
+            \State \Return $\bot$
+        \EndIf
+        \State $r_- \gets r_i$
+        \State $i \gets i+1$
+        \State $s_{\textsf{cl}} \gets \textsf{sig}_\textsf{cl}(i, r_i, r_{i-1})$
+        \State \Return $c = (i, r_i, r_{i-1}; s_{\textsf{cl}})$
+    \EndFunction
+  \end{algorithmic}
+\end{algorithm}
+
 
 SMT can return trustless inclusion and non-inclusion proofs to the user; where each proof is certified by a certificate from the Consensus Layer.
 
@@ -175,6 +240,55 @@ Proof verification works as follows:
 \end{enumerate}
 
 This shows that given authentic $r_{i-1}, r_i$, the keys in $B_i$ were empty before the insertion batch, and after execution of the insertion batch the values in $B_i$ were recorded at the positions defined by their respective keys, and there were no other changes.
+
+
+\begin{algorithm}[tb]
+  \caption{Verification of non-deletion proof}\label{alg:verifynondeletion}
+  \begin{algorithmic}[1]
+    \Function{VerifyNonDeletion}{$\pi, r_{i-1}, r_i, K, V$}
+      \State   \Comment{Proof $\pi$ is an array of dictionaries}
+      \State   \Comment{Assumes that keys in $K$ are sorted}
+      \State $p_\varnothing \gets \{(k, \varnothing) \mid k \in K\}$ \Comment{empty leaves}
+      \State $r_\varnothing \gets$ \Call{ComputeForest}{$\pi, p_\varnothing$}
+      \If{$r_\varnothing \ne r_{i-1}$}
+        \State \Return $\bot$
+      \EndIf
+      \State \Comment{Same with batch's leaves populated}
+      \State $p_B \gets \{(k, v) \mid (k,v) \in (K, V)\}$
+      \State $r_B \gets$ \Call{ComputeForest}{$\pi, p_B$}
+      \If{$r_B \ne r_i$}
+        \State \Return $\bot$
+      \EndIf
+      \State \Return $1$ \Comment{Success}
+    \EndFunction
+
+    \Function{ComputeForest}{$\pi, p$}
+      \For{$\ell \gets \text{tree\_depth}-1 \textbf{ to } 0$}
+        \State $p' \gets [\,]$
+        \State $i \gets 0$
+        \While{$i < |p|$}
+          \State $(k, v) \gets p[i]$
+          \State $i_p \gets \lfloor k / 2 \rfloor$ \Comment{parent index}
+          \State $\text{is\_right} \gets k \bmod 2$
+          \State $i_s \gets 2i_p + (1 - \text{is\_right})$ \Comment{sibling idx}
+          \If{$\lnot \text{is\_right} \land \allowbreak |p| > i+1 \land p[i+1].k = i_s$}
+            \State        \Comment{Special case: }
+            \State $i \gets i + 1$ \Comment{right sibling is next}
+            \State $v_s \gets p[i].v$ \Comment{Sibling value}
+          \Else
+            \State $v_s \gets \pi[\ell].\text{get}(s).\text{or\_else}( \varnothing)$
+          \EndIf
+          \State $v_p \gets h(v_s, v)$ \textbf{if} is\_right \textbf{else} $h(v, v_s)$
+          \State $p' \gets p' \cup (p, v_p)$
+          \State $i \gets i + 1$
+        \EndWhile
+        \State $p \gets p'$
+      \EndFor
+      \State \textbf{assert} $|p| = 1$ \Comment{one root}
+      \State \Return $p[0].v$ \Comment{value of the root}
+    \EndFunction
+  \end{algorithmic}
+\end{algorithm}
 
 
 \section{(ZK)-SNARKs}

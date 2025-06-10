@@ -26,7 +26,7 @@ jobs:
       - name: Upload PDF as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Aggretaion-Layer-Techreport
+          name: Aggregation-Layer-Techreport
           path: aggregation-layer.pdf
           if-no-files-found: error
           compression-level: 0
@@ -42,8 +42,15 @@ jobs:
       - name: Download artifact
         uses: actions/download-artifact@v4
         with:
-          name: Aggretaion-Layer-Techreport
-          path: .
+          name: Aggregation-Layer-Techreport
+          path: ./
+
+      - name: Delete existing releases
+        uses: dev-drprasad/delete-older-releases@v0.3.4
+        with:
+          keep_latest: 0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Get latest commit info
         id: commit
@@ -60,18 +67,17 @@ jobs:
 
       - name: Create or Update GitHub Release
         id: create_release
-        uses: softprops/action-gh-release@v2
+        uses: ncipollo/release-action@v1
         with:
-          tag_name: latest
+          tag: latest
           name: "Unicity Infrastructure - the Aggregation Layer technical report"
           body: |
             📄 This release contains the latest compiled version of the Unicity Infrastructure - the Aggregation Layer technical report.
             - Date: ${{ env.release_date }}
             - Commit: ${{ env.sha_short }}
-          files: aggregation-layer.pdf
-          draft: false
-          prerelease: false
-          recreate: true
+          artifacts: aggregation-layer.pdf
+          allowUpdates: true
+          artifactErrorsFailBuild: true
+          makeLatest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-

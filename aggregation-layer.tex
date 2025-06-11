@@ -96,7 +96,7 @@ Aggregation Layer connects to the Consensus Layer. For fully trustless operation
 \subsection{Consensus Layer}
 Decentralization is achieved by a Proof-of-Work (PoW) blockchain instance which manages consensus, including the validator selection for the BFT finality gadget, native token (ALPHA), executing tokenomics plan, and validator incentive handling. PoW is specifically robust during the bootstrapping of a decentralized system: when the number of validators fluctuates, the financial value of tokens is low, and token distribution is relatively concentrated. PoW shows great liveness properties. At the same time, PoW chains do not provide fast and deterministic finality: many blocks of confirmations are needed to achieve a reasonable level of certainty. In Unicity, this is mitigated by including a BFT ``finality gadget'' which runs rather fast, and the finality of transactions below is defined by the consensus of the BFT cluster.
 
-The PoW layer provides permissionlessness, a core property of decentralized blocchains. Any validator can actively participate in mining, and blocks are chosen based on the longest-chain rule. By selecting a PoW mining puzzle that is resistant to acceleration by GPUs and ASICs (specifically: RandomX~\cite{ramdomx}), we aim to further democratize the participation in the network.
+The PoW layer provides permissionlessness, a core property of decentralized blockchains. Any validator can actively participate in mining, and blocks are chosen based on the longest-chain rule. By selecting a PoW mining puzzle that is resistant to acceleration by GPUs and ASICs (specifically: RandomX~\cite{randomx}), we aim to further democratize the participation in the network.
 
 PoW chains encounter rollbacks ("reorgs") when alternative chains with a greater cumulative PoW work emerge. Limiting the maximum length of alternative chains creates the risk of involuntary forking---both alternative chains may be too long for a rollback. This risk is specifically mitigated by a finality gadget. On the other hand, PoW chains are extremely robust. If any number of validators leave or join the network, the chain continues to grow, and the block rate eventually adjusts to the new total mining power. In short, PoW trades liveness for safety.
 
@@ -163,7 +163,7 @@ The Aggregation Layer implements an authenticated, append-only dictionary data s
 
     % Arrows
     \draw[arrow] ([xshift=-0.1cm]triangle.north) -- ++(0,1) node[labelstyle, left] {$(r_i, r_{i-1}, \pi)$} -- ([xshift=-0.1cm]consensus.south);
-    \draw[arrow] ([xshift=0.1cm]consensus.south) -- node[labelstyle, right] {$c = (r_i, r_{i-1}; s_{\textsf{cl}})$} ([xshift=0.1cm]triangle.north);
+    \draw[arrow] ([xshift=0.1cm]consensus.south) -- node[labelstyle, right] {$c = (i, r_i, r_{i-1}; s_{\textsf{cl}})$} ([xshift=0.1cm]triangle.north);
     \draw[arrow] ([xshift=-0.4cm]users.north) -- node[labelstyle, left] {$B = (k_1, k_2, \ldots, k_j)$} ([xshift=-0.4cm]triangle.south);
     \draw[arrow] ([xshift=0.4cm]triangle.south) -- ++(0,-1) node[labelstyle, right] {
             $\substack{
@@ -180,7 +180,7 @@ It authenticates incoming state transfer certification requests by verifying if 
 
 Authenticated requests are processed in batches, denoted as $B_i$. At the end of each batch, the Aggregation Layer produces its summary root hash $r_i$ and sends it to the Consensus Layer for certification. A certification request $(r_i, r_{i-1}, \pi)$ includes: 1) the previous state root hash, 2) the new state root hash, 3) a consistency proof of the changes made during the batch, and 4) an authenticator that identifies the operator.
 
-The Consensus Layer certifies the request only if it uniquely \textit{extends} a previously certified state root and the consistency proof is valid. It returns a certificate $c = (r_i, r_{i-1}; s_{\textsf{cl}})$, where $s_{\textsf{cl}}$ is a signature from the Consensus Layer (e.g., a threshold signature from the consensus nodes or a proof of inclusion in a finalized block).
+The Consensus Layer certifies the request only if it uniquely \textit{extends} a previously certified state root and the consistency proof is valid. It returns a certificate $c = (i, r_i, r_{i-1}; s_{\textsf{cl}})$, where $s_{\textsf{cl}}$ is a signature from the Consensus Layer (e.g., a threshold signature from the consensus nodes or a proof of inclusion in a finalized block).
 
 Each state can be extended only once, which prevents forks within the Aggregation Layer. Each subsequent round extends the most recently certified state.
 
@@ -193,7 +193,7 @@ We model the Consensus Layer as an oracle, as shown in Algorithm~\ref{alg:consen
         \State $r_- \gets \bot$
         \State $i \gets 0$
     \EndFunction
-    \Function{CertificationRequest}{$(r_i, r_{i-1}, \pi)$}
+    \Function{CertificationRequest}{$r_i, r_{i-1}, \pi$}
         \If {$(r_{i-1} \ne  r_-) \lor \lnot\Call{valid}{\pi, r_i, r_{i-1}}$}
             \State \Return $\bot$
         \EndIf
@@ -246,15 +246,14 @@ Complete verification algorithm is presented as Algorithm~\ref{alg:verifynondele
 \begin{algorithm}[tb]
   \caption{Verification of non-deletion proof}\label{alg:verifynondeletion}
   \begin{algorithmic}[0]
-    \Function{VerifyNonDeletion}{$\pi, r_{i-1}, r_i, K, V$}
+    \Function{VerifyNonDeletion}{$\pi, r_{i-1}, r_i, P$}
       \State   \Comment{Proof $\pi$ is an array of dictionaries}
-      \State   \Comment{Assumes that keys in $K$ are sorted}
-      \State $p_\varnothing \gets \{(k, \varnothing) \mid k \in K\}$ \Comment{empty leaves}
+      \State   \Comment{Insertion batch $P$ is sorted array of key-value tuples}
+      \State $p_\varnothing \gets \{(k, \varnothing) \mid (k, v) \in P\}$ \Comment{empty leaves}
       \State $r_\varnothing \gets$ \Call{ComputeForest}{$\pi, p_\varnothing$}
       \State \textbf{assert} $r_\varnothing = r_{i-1}$
       \State \Comment{Same with batch's leaves populated}
-      \State $p_B \gets \{(k, v) \mid (k,v) \in (K, V)\}$
-      \State $r_B \gets$ \Call{ComputeForest}{$\pi, p_B$}
+      \State $r_B \gets$ \Call{ComputeForest}{$\pi, P$}
       \State \textbf{assert} $r_B = r_i$
       \State \Return $1$ \Comment{Success}
     \EndFunction
@@ -262,23 +261,23 @@ Complete verification algorithm is presented as Algorithm~\ref{alg:verifynondele
     \Function{ComputeForest}{$\pi, p$}
       \For{$\ell \gets \text{tree\_depth}-1 \textbf{ to } 0$}
         \State $p' \gets [\,]$
-        \State $i \gets 0$
-        \While{$i < |p|$}
-          \State $(k, v) \gets p[i]$
+        \State $j \gets 0$
+        \While{$j < |p|$}
+          \State $(k, v) \gets p[j]$
           \State $k_p \gets \lfloor k / 2 \rfloor$ \Comment{Parent key}
           \State $\text{is\_right} \gets k \bmod 2$
           \State $k_s \gets 2k_p + (1 - \text{is\_right})$ \Comment{Sibling key}
-          \If{$\lnot \text{is\_right} \land |p| > i+1 \land p[i+1].k = k_s$\\ \hskip 4em}
+          \If{$\lnot \text{is\_right} \land |p| > j+1 \land p[j+1].k = k_s$\\ \hskip 4em}
                                          \Comment{Special case: }
             \State $v_s \gets p[i+1].v$  \Comment{right sibling is next}
-            \State $i \gets i + 1$       \Comment{jump over.}
+            \State $j \gets j + 1$       \Comment{jump over.}
           \Else                          \Comment{Get sibling value from proof,}
             \State                       \Comment{assign $\varnothing$ if not in layer's dict}
             \State $v_s \gets \pi[\ell].\text{get}(k_s).\text{or\_else}( \varnothing)$
           \EndIf
           \State $v_p \gets h(v_s, v)$ \textbf{if} is\_right \textbf{else} $h(v, v_s)$
-          \State $p' \gets p' \cup (k_p, v_p)$
-          \State $i \gets i + 1$
+          \State $p' \gets p' \| (k_p, v_p)$
+          \State $j \gets j + 1$
         \EndWhile
         \State $p \gets p'$
       \EndFor
@@ -328,7 +327,7 @@ Each hashing unit takes its inputs either from the outputs of the previous layer
     \caption{Circuit structure.}\label{fi:smt-circuit}
 \end{figure*}
 
-Each hashing cell in the circuit, as depicted in Figure~\ref{fi:smt-circuit-cell}, is a template consisting of two input multiplexers and one 2-to-1 compresing hash function.
+Each hashing cell in the circuit, as depicted in Figure~\ref{fi:smt-circuit-cell}, is a template consisting of two input multiplexers and one 2-to-1 compressing hash function.
 
 \begin{figure}[t]
     \centering
@@ -369,16 +368,15 @@ Initial benchmarks on a consumer laptop (Apple M1) using the Poseidon hash funct
 
 An alternative to a bespoke arithmetic circuit is to use a general-purpose zero-knowledge virtual machine (zkVM). In this approach, the verification logic is written as a traditional imperative program (e.g., in Rust). The zkVM then generates a proof of correct execution for that program.
 
-
-We have a fixed circuit written as a Rust program~\cite{stark}. As a commitment to the ``right'' verification program we use a prover key, generated during setup. Its contents are: a commitment to the preprocessed traces, the starting Program Counter register, the starting global digest of the program, after incorporating the initial memory; the chip information, the chip ordering. Probably prover config -- underlying finite field, PCS scheme, etc. -- as well.
+We have implemented the non-deletion proof verification algorithm as a Rust program~\cite{stark}. As a commitment to the ``right'' program we use a prover key, generated during program setup. Its contents are: a commitment to the preprocessed traces, the starting Program Counter register, the starting global digest of the program, after incorporating the initial memory; the chip information, the chip ordering; and prover configuration.
 
 For verification, we obtain the prover key hash and authenticate it off-band.
 
-\begin{sloppypar}
-After verifying the proof (\lstinline|client.verify(&proof, &vk)|), we can be sure that \lstinline|proof: SP1ProofWithPublicValues| is valid. The proof data structure embeds its validated ``instance'', or public parameters. Based on these parameters we check that indeed, the right thing was validated by our program. In our case the instance is defined by the old root hash, new root hash, and the batch size. Now we know, that the proof (this is the hash-based non-deletion proof of the SMT's change being consistent) verification algorithm was executed correctly, and this algorithm was happy with its public and private inputs; and thereby the batch of additions inserted into the SMT was also executed correctly: started its processing with an initial state and after inserting n transactions (and not removing nor modifying any existing leaves) reached the final summary state. Obviously, the before-state and after-state must be authentic. This is achieved by committing them to an append-only dictionary / blockchain / Unicity's BFT layer.
-\end{sloppypar}
+%\begin{sloppypar}
+After verifying the proof (\lstinline|client.verify(&proof, &vk)|), we can be sure that \lstinline|proof: SP1ProofWithPublicValues| is valid. The proof data structure embeds its validated ``instance'', or public parameters. Based on these parameters we check that indeed, the right thing was executed. In our case the instance is defined by the old root hash and the new root hash, which must be authenticated independently (i.e., using the certificate from Consensus Layer).
+%\end{sloppypar}
 
-We do not care about the privacy of the ``secret'' witness. Mamy STARKs can be somewhat more efficiently instantiated if only computational integrity is required. Ignoring the privacy aspect is common to many practical zkVMs.
+The privacy of the witness (the zero-knowledge property) is not a requirement for this application. The primary goal is to achieve computational integrity and succinctness. Therefore, while the underlying technology is often referred to as `ZK', we are using it as a Scalable Transparent ARgument of Knowledge (STARK).
 
 
 \subsection{Optimization Ideas}
@@ -387,49 +385,42 @@ The ZK proving performance is dominated by the cryptographic hashing primitive u
 
 At the time of writing, the SP1 zkVM\footnote{\url{https://docs.succinct.xyz/docs/sp1/introduction}} offers precompiles for standard hash functions like SHA-256, which accelerates their execution compared to a direct RISC-V implementation. The use of these precompiles (also known as coprocessors or chips) can be observed in the prover's output, which details the number of calls to each specialized circuit (e.g., \lstinline|SHA_EXTEND|, \lstinline|SHA_COMPRESS|). However, even with acceleration, proving SHA-256 is computationally expensive.
 
-A possible optimization is the use of specific ``ZK friendly'' hash functions. It works great on circuit based arithmetization with direct access to computational units, or (finite) 'field elements'. On RISC-V zkVM's it is nuanced. A program sees only 32-bit CPU registers; to overcome it, there are some precompiles which are implemented as circuits -- thus can provide some benefit; but there is still a translation expense between 32-bit integer registers and native field elements. Range checking to detect overflows is not efficient in ZK! There are attempts with ZK friendly hash function precompiles\footnote{\url{https://github.com/Okm165/sp1-poseidon2/pull/8}}, with limited real-world effect.
+A possible optimization is to use ``ZK-friendly'' hash functions. These functions are highly efficient when implemented directly in arithmetic circuits, where there is direct access to the native field elements. Their performance advantage in a RISC-V zkVM is more nuanced, as there is an overhead in translating between the VM's 32-bit integer registers and the underlying finite field elements as used by the prover. Operations like range-checking, which are necessary to prevent overflows, are expensive in ZK. There are attempts to create precompiles for ZK-friendly hash functions\footnote{\url{https://github.com/Okm165/sp1-poseidon2/pull/8}}, with limited real-world effect.
 
 
 \subsection{More on ZK and Hash Functions}
 
-Standardized cryptographic hash algorithms are optimized for the minimal physical chip area. This is NIST's choice. Some others for fast execution on CPU, like the Blake family. They all include lots of operations which are easy on silicon logic like rotations, bitwise operations, etc. These are notoriously slow for ZK provers though. Usually, one bit is represented as a full field element (for example, on a BN254 field -- a whole 254 bit value per one bit!\footnote{See e.g. \url{https://github.com/iden3/circomlib/blob/master/circuits/sha256/sha256.circom}}). Also, ZK likes linear operations like +, -, and multiplication. The rest is emulated through those.
+Standardized cryptographic hash algorithms like SHA-2 were optimized mostly for minimal physical chip area, a design choice driven by NIST. Others, like the Blake family, were designed for fast execution on CPUs. They all include numerous bitwise operations (e.g., rotations, XOR) that are simple to implement in silicon logic but are notoriously inefficient to prove in ZK. Proving such operations can be expensive, as a full field element (e.g., a 254-bit value on the BN254 curve) must be used to represent a single bit.\footnote{See e.g. \url{https://github.com/iden3/circomlib/blob/master/circuits/sha256/sha256.circom}} ZK provers are most efficient with arithmetic operations native to the underlying finite field, such as addition and multiplication. Other operations must be implemented indirectly.
 
-There are some newer cryptographic hash functions specifically designed for ZK efficiency in mind, like Poseidon, Poseidon2, which are already somewhat established but still young; some are better on large fields (Reinforced Concrete), some on smaller (Monolith), while depending on the proof system's lookup table support. Some are bleeding edge (Griffin, Anemoi) and super fast. Some are even okay-ish on a silicon CPU, e.g., GMiMC.
+There are some newer cryptographic hash functions specifically designed for ZK efficiency in mind. Functions like Poseidon and Poseidon2 are gaining acceptance but are still relatively new. Some are better on large fields (e.g.,Reinforced Concrete), some on smaller (e.g., Monolith) and depending on the proof system's lookup table support. Even newer and exhibiting even higher performance examples are Griffin, Anemoi. Some, like GMiMC, are offering a compromise with better silicon CPU performance.
 
-These operate on full field elements without translation. Security level is defined by the underlying field and instantiation parameters. The smaller the field, the more field elements we need for the hash function's state and output. But still, only a few.
-
-Different zkVM's have different sets of precompiles. Basically all run on RISC-V 32-bit integers. Cairo / Starknet VM provides direct access to the field elements , but its VM is rather specialized to be used for a L2 roll-up.
-
+A key advantage of these hashes is that they operate directly on field elements, avoiding the costly translation from integer representations. The security level is defined by the underlying field and instantiation parameters. While some VMs, like the Cairo VM used by Starknet, provide direct access to field elements, they are often highly specialized for particular use cases, such as L2 rollups.
 
 \subsection{Performance Indication}
 
-On a consumer laptop (10-core Macbook M1), the proving time of a 500-transaction batch, using the SHA2 hash function, is 5 minutes. But, SP1 goes like a bulldozer, whatever one throws at it. It supports distributed prover networks and industrial-grade GPUs and proof recursion and whatnot.
+On a 10-core Apple M1 CPU, proving a 500-transaction batch using SHA-256 within the SP1 zkVM takes approximately 5 minutes. However, the SP1 framework is robust and designed for scalability, supporting distributed prover networks, industrial-grade GPUs, proof chunking and recursion, and other advanced features to tackle larger problems with brute force.
 
+\subsection{Performance Optimization}
 
-\subsection{How to avoid the bottleneck}
+The overall approach is sound: the proving time depends on the size of the addition batch, and notably, it does not have linear relationship to the total capacity of the data structure. The verification algorithm is tight.
 
-The setup is quite optimal: proving time depends on the size of the addition batch (NOT batch size times tree capacity). The verification algorithm looks tight.
+To overcome the performance bottleneck, a ZK-friendly hash function is essential. The ideal proving framework would provide direct access to the native field elements of its arithmetization layer, a feature not typically available in general-purpose zkVMs. Execution trace generation must be highly efficient (a criterion that excludes older frameworks like Cairo 0). The prover itself must be fast. State-of-the-art uses small prime fields (e.g., BabyBear, Mersenne-31) and FRI-based polynomial commitment schemes, like Circle-STARKs. Promising implementations are Plonky3\footnote{\url{https://github.com/Plonky3/Plonky3}} and STwo\footnote{\url{https://github.com/starkware-libs/stwo}}. Considering the need for maturity, modularity, and an open-source license, Plonky3 emerges as the strongest option.
 
-We need to use ZK friendly hash functions. The framework should provide direct access to native field elements, as used by the arithmetization layer (this excludes zkVMs). The execution trace generation must be super fast (this excludes Cairo 0). The prover must be fast; state of the art is small fields (BabyBear, Mersenne 31 etc), and a prover based on FRI, and Circle-STARK: candidates are Plonky3\footnote{\url{https://github.com/Plonky3/Plonky3}} and STwo\footnote{\url{https://github.com/starkware-libs/stwo}}. Better if reasonably mature and modular and open. Leaving us with Plonky3.
-
-And the verification algorithm must be hand-crafted as a custom AIR circuit.
+To utilize the Plonky3 framework, the verification logic must be implemented as a custom AIR circuit (Algebraic Intermediate Representation) rather than a general-purpose program.
 
 \subsection{Performance Indication}
 
-Indirect test with similar computation (Plonky3 framework, Poseidon2 hash function, small Koala Bear finite field) shows the expected proving performance of this stack being 10000 tx/s, on a 10-core CPU, blowup factor $2^1$, proof size 1.7 MB, or with a less aggressive configuration with blowup factor $2^3$ approx 2500 tx/s, with proof size 670 kB, and increased prover memory requirement.
+Extrapolating from benchmarks of similar computations using the Plonky3 framework, Poseidon2 hash function, and a small finite field, the projected performance of such a stack on a 10-core CPU is approximately 10,000 tx/s. The parameter ``blowup factor'' is $2^1$, resulting in a 1.7 MB proof. A more conservative configuration with a blowup factor of $2^3$ would yield approximately 2,500 tx/s with a 670 kB proof, and higher memory requirements for the prover.
 
-This shows that running the Aggregation Layer trustlessly is economically quite feasible.
+These figures indicate that operating the Aggregation Layer in a trustless manner is economically feasible.
 
-We note that the Poseidon family of hash functions is rather new and has seen much less cryptographic analysis than traditional hash functions like SHA2, Blake family; but amongst the new wave of ZK-friendly arithmetic hash functions, it has seen most of the scrutiny and can be tentatively considered as secure. On the other hand, we win about $50x$ in proving effort compared to, e.g., Blake 3.
+We note that the Poseidon family of hash functions is relatively new and has undergone less cryptographic analysis than traditional hash functions like the SHA2 or SHA3 families. However, among the new class of ZK-friendly arithmetic hash functions, Poseidon has undergone the most public scrutiny and can be tentatively considered secure for this type of application. It offers an estimated 50x improvement in proving performance compared to efficient standard hash function like Blake3.
 
+\section{Summary}
 
-\subsection{Summary}
+Zero-knowledge proof systems offer a powerful method for creating succinct proofs of performing some computation, in our case, checking consistency proofs of a distributed cryptographic data structure. For use cases with small changesets, a simple hash-based proof, whose size is linear in the batch size, is optimal. However, as batch sizes increase and bandwidth becomes a constraint, the constant or near-constant size proofs generated by ZK systems become more advantageous.
 
-Zero knowledge proofs are a great way to compress the size of consistency proofs. For different use-cases and parameters different tools are optimal. For very small addition batches, just a hash-based proof, whose size is linear to the batch size, is optimal. But when the batch is larger or bandwidth is limited then ZK compression becomes useful.
-
-Some of the proof systems produce larger proofs at the cost of reduced proving complexity and generality, i.e. lack of a trusted setup; some produce very small proofs at the cost of proof effort, a trusted setup which may be circuit specific.
-
-For more complicated use-cases a hybrid setup and proof recursion are useful. See Fig.~\ref{fig:comp} for how previously discussed technologies compare.
+Different proof systems offer different trade-offs. The properties are: proving effort, necessity of trusted setup, generality of trusted setup, interactivity, proof recursion-friendliness, and of course properties like availability of tooling, maturity, trustworthiness. Some, like STARKs, are relatively fast to prove but have fairly large proofs; and avoid undesirable properties such as trusted setup. Others, like Groth16, produce small proofs but require more proving effort and a circuit-specific trusted setup. For more complex applications, hybrid approaches and proof recursion can be employed. Figure~\ref{fig:comp} illustrates the proof size trade-off.
 
 \begin{figure}[!htbp]
     \centering
@@ -454,7 +445,7 @@ ytick=\empty,
 \node [blue, above left] at (axis cs:10,1) {SNARK (e.g. Groth16)};
 \end{axis}
 \end{tikzpicture}
-    \caption{Proof size vs. use of ZK compression. Note that while STARKs produce generally larger proofs, they're easier to compute and do not depend on a trusted setup.}\label{fig:comp}
+    \caption{Proof size vs. use of ZK compression. Note that while STARKs produce generally larger proofs, they are typically faster to generate and do not depend on a trusted setup.}\label{fig:comp}
 \end{figure}
 
 

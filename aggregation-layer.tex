@@ -3,6 +3,9 @@
 \usepackage{graphicx}
 \usepackage{amsmath}
 \usepackage{amssymb}
+\usepackage{cite}
+\usepackage{booktabs} % table
+\usepackage{makecell} % table cell wrapping
 \usepackage{listings}
 \usepackage{xcolor}
 \usepackage{accsupp}
@@ -64,9 +67,52 @@ Unicity is a novel blockchain protocol with the ambitious goal of enabling token
 \end{abstract}
 
 
-\section{Introduction}
+\section{Motivation}
 
-The foundational principle of the Unicity Network is to minimize the volume of on-chain data. This is based on the observation that shared (``on-chain'') state is unavoidable only to prevent double-spending.\footnote{This holds unless one employs centrally controlled, non-transparent technologies such as trusted hardware wallets or Trusted Execution Environments (TEEs).} The core tenets of Unicity also include minimizing trust requirements, enhancing user privacy, and providing linear scale.
+The foundational principle of the Unicity Network~\cite{wp} is to minimize the volume of on-chain data. This is based on the observation that shared (``on-chain'') state is unavoidable only to prevent double-spending.\footnote{This holds unless one employs centrally controlled, non-transparent technologies such as trusted hardware wallets or Trusted Execution Environments (TEEs).} The core tenets of Unicity also include minimizing trust requirements, enhancing user privacy, and providing linear scale.
+
+% table with rows: different zk tech and parameters (blowup factor)
+% columns: proving time (tx/s), proof size, asymptotics, trusted setup, pq secure, implementation effort
+
+\begin{table*}[h!]
+\centering
+\caption{Comparison of Zero-Knowledge Proof Technologies for Non-deletion Proof Compression}
+\label{tab:zk-comparison}
+\begin{tabular}{@{}lccccccc@{}}
+\toprule
+\textbf{ZK Stack} &
+\makecell{\textbf{Hash}\\\textbf{Function}} &
+\makecell{\textbf{Proving}\\\textbf{Time (tx/s)}} &
+\makecell{\textbf{Proof}\\\textbf{Size}} &
+\makecell{\textbf{Proof Size}\\\textbf{Asymptotics}} &
+\makecell{\textbf{Trusted}\\\textbf{Setup}} &
+\makecell{\textbf{PQ}\\\textbf{Secure}} &
+\textbf{Effort} \\
+\midrule
+None (``hash based'') & SHA256 & 10 000\textsuperscript{*} & 10MB & $O(n)$ & No & Yes & N/A \\
+CIRCOM+Groth16         & Poseidon & 25 & 250b & $O(1)$ & Yes & No & Lower \\
+Gnark+Groth16          & Poseidon & 30 & 250b & $O(1)$ & Yes & No & Low \\
+SP1 zkVM  & SHA256 & 1.5 & 2MB & $O(\log n)$ & No & Yes & Lowest \\
+Cairo0 + STwo    & Poseidon2 & 60\textsuperscript{†} & 2.4MB & $O(\log n)$ & No & Yes & Medium \\
+AIR + Plonky3   & Poseidon2 & 10 000 & 1.7MB & $O(\log n)$ & No & Yes & High \\
+AIR + Plonky3   & Poseidon2 & 2500 & 670kB & $O(\log n)$ & No & Yes & High \\
+AIR + Plonky3   & Blake3 & 250 & 1.7MB & $O(\log n)$ & No & Yes & High \\
+
+\bottomrule
+\end{tabular}
+
+\vspace{0.5em}
+\raggedright
+\textsuperscript{*} Bandwidth limited\\
+\textsuperscript{†} Trace generation before proving is impractically slow.
+\end{table*}
+
+
+% zk use vs zk in L2
+
+% zk use vs zk in privacy coins (nullifiers)
+
+% numbers to last page graph
 
 
 \section{System Architecture}
@@ -211,6 +257,17 @@ The SMT provides users with inclusion and non-inclusion proofs. Each proof is an
 The Consensus Layer must guarantee data availability. If recent state roots were lost, it would become impossible to reject duplicate state transition requests, potentially allowing malicious actors to double-spend against an old, un-extendable state. The Aggregation Layer itself does not require an internal consensus mechanism; protocols like Raft could be used for replication and coordination among its redundant nodes. The decentralized consensus is provided by the external Consensus Layer.
 
 If each state transition is accompanied by a cryptographic proof of non-deletion (see Section~\ref{sec:consistency-proof}), the Aggregation Layer can be considered trustless.
+
+% TODO \subsection{``Pragmatist'' Security Assumptions}
+
+
+\subsection{``Maximalist'' Security Assumptions}
+
+Here we assume model where user has the ability to validate all aspects of the system operation, analogous to the highest standards of trustlessness introduced by the Bitcoin~\cite{bitcoin}, where ``client'' is actually a full validator of the system, and starts with downloading and validating the blockchain from the genesis block.
+
+In a scalable system, such level of trustlessness is only possible with the help of cryptographic zero-knowledge proofs, which allow to verify the correctness of the system operation in more succinct way.
+
+The Root of Trust is PoW blockchain.
 
 
 \section{Consistency Proof}
@@ -368,7 +425,7 @@ Initial benchmarks on a consumer laptop (Apple M1) using the Poseidon hash funct
 
 An alternative to a bespoke arithmetic circuit is to use a general-purpose zero-knowledge virtual machine (zkVM). In this approach, the verification logic is written as a traditional imperative program (e.g., in Rust). The zkVM then generates a proof of correct execution for that program.
 
-We have implemented the non-deletion proof verification algorithm as a Rust program~\cite{stark}. As a commitment to the ``right'' program we use a prover key, generated during program setup. Its contents are: a commitment to the preprocessed traces, the starting Program Counter register, the starting global digest of the program, after incorporating the initial memory; the chip information, the chip ordering; and prover configuration.
+We have implemented the non-deletion proof verification algorithm as a Rust program~\cite{stark} to be proved by the SP1 zkVM~cite{sp1}. As a commitment to the ``right'' program we use a prover key, generated during program setup. Its contents are: a commitment to the preprocessed traces, the starting Program Counter register, the starting global digest of the program, after incorporating the initial memory; the chip information, the chip ordering; and prover configuration.
 
 For verification, we obtain the prover key hash and authenticate it off-band.
 
@@ -404,7 +461,7 @@ On a 10-core Apple M1 CPU, proving a 500-transaction batch using SHA-256 within 
 
 The overall approach is sound: the proving time depends on the size of the addition batch, and notably, it does not have linear relationship to the total capacity of the data structure. The verification algorithm is tight.
 
-To overcome the performance bottleneck, a ZK-friendly hash function is essential. The ideal proving framework would provide direct access to the native field elements of its arithmetization layer, a feature not typically available in general-purpose zkVMs. Execution trace generation must be highly efficient (a criterion that excludes older frameworks like Cairo 0). The prover itself must be fast. State-of-the-art uses small prime fields (e.g., BabyBear, Mersenne-31) and FRI-based polynomial commitment schemes, like Circle-STARKs. Promising implementations are Plonky3\footnote{\url{https://github.com/Plonky3/Plonky3}} and STwo\footnote{\url{https://github.com/starkware-libs/stwo}}. Considering the need for maturity, modularity, and an open-source license, Plonky3 emerges as the strongest option.
+To overcome the performance bottleneck, a ZK-friendly hash function is essential. The ideal proving framework would provide direct access to the native field elements of its arithmetization layer, a feature not typically available in general-purpose zkVMs. Execution trace generation must be highly efficient (a criterion that excludes older frameworks like Cairo 0). The prover itself must be fast. State-of-the-art uses small prime fields (e.g., BabyBear, Mersenne-31) and FRI-based polynomial commitment schemes, like Circle-STARKs~\cite{cryptoeprint:2024/278}. Promising implementations are Plonky3\footnote{\url{https://github.com/Plonky3/Plonky3}} and STwo\footnote{\url{https://github.com/starkware-libs/stwo}}. Considering the need for maturity, modularity, and an open-source license, Plonky3 emerges as the strongest option.
 
 To utilize the Plonky3 framework, the verification logic must be implemented as a custom AIR circuit (Algebraic Intermediate Representation) rather than a general-purpose program.
 
@@ -449,16 +506,8 @@ ytick=\empty,
 \end{figure}
 
 
-\begin{thebibliography}{9}
+\bibliographystyle{plain}
+\bibliography{aggregation-layer}
 
-\bibitem{wp} The Unicity Developers: Unicity Whitepaper (2025) \url{https://github.com/unicitynetwork/whitepaper-tex/releases/tag/latest}
-
-\bibitem{snark} Trustless SMT accumulator. Github repository. \url{https://github.com/unicitynetwork/nd-smt}
-
-\bibitem{stark} SP1 zkVM based consistency proof. Github repository. \url{https://github.com/unicitynetwork/zkvm-ndsmt}
-
-\bibitem{randomx} Tevador: RandomX: Experimental proof of work algorithm based on random code execution. Github repository. \url{https://github.com/tevador/RandomX}
-
-\end{thebibliography}
 
 \end{document}

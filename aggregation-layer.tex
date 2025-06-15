@@ -63,7 +63,7 @@
 \maketitle
 
 \begin{abstract}
-Unicity is a novel blockchain protocol with the ambitious goal of enabling token transactions to occur off-chain and, potentially, offline. This premise requires supporting infrastructure to guarantee that there are no parallel states of assets, or more specifically, that there is no double-spending; a property we term the \textit{unicity}. It turns out that the lack of globally shared state and ordering reduces the blockchain overhead considerably. In designing this infrastructure, no compromises were made regarding its trust assumptions. This paper details the design of the Aggregation Layer, the component responsible for producing unicity certificates. We analyze its design for efficiency and evaluate the robustness of its trust and security model, and gains offered by cryptographic zero knowledge tools which are specifically efficient for the use-case.
+Unicity is a novel blockchain protocol with the ambitious goal of enabling token transactions to occur off-chain and, potentially, offline. This premise requires supporting infrastructure to guarantee that there are no parallel states of assets, or more specifically, that there is no double-spending; a property we term the \textit{unicity}. It turns out that the lack of globally shared state and ordering reduces the blockchain overhead considerably. In designing this infrastructure, no compromises were made regarding its trust assumptions. This paper details the design of the Aggregation Layer, the component responsible for producing unicity certificates. We analyze its design for efficiency and evaluate the robustness of its trust and security model, and gains offered by cryptographic zero-knowledge tools which are specifically efficient for the use-case.
 \end{abstract}
 
 
@@ -72,39 +72,39 @@ Unicity is a novel blockchain protocol with the ambitious goal of enabling token
 The foundational principle of the Unicity Network~\cite{wp} is to minimize the volume of on-chain data. This is based on the observation that shared (``on-chain'') state is unavoidable only to prevent double-spending.\footnote{This holds unless one employs centrally controlled, non-transparent technologies such as trusted hardware wallets or Trusted Execution Environments (TEEs).} The core tenets of Unicity also include minimizing trust requirements, enhancing user privacy, and providing linear scale.
 
 % table with rows: different zk tech and parameters (blowup factor)
-% columns: proving time (tx/s), proof size, asymptotics, trusted setup, pq secure, implementation effort
+% columns: proving speed (tx/s), proof size, asymptotics, trusted setup, pq secure, implementation effort
 
 \begin{table*}[h!]
 \centering
-\caption{Comparison of Zero-Knowledge Proof Technologies for Non-deletion Proof Compression}
+\caption{Comparison of zero-knowledge proof technologies for compression of non-deletion proofs.}
 \label{tab:zk-comparison}
 \begin{tabular}{@{}lccccccc@{}}
 \toprule
 \textbf{ZK Stack} &
 \makecell{\textbf{Hash}\\\textbf{Function}} &
-\makecell{\textbf{Proving}\\\textbf{Time (tx/s)}} &
+\makecell{\textbf{Proving}\\\textbf{Speed (tx/s)}} &
 \makecell{\textbf{Proof}\\\textbf{Size}} &
 \makecell{\textbf{Proof Size}\\\textbf{Asymptotics}} &
 \makecell{\textbf{Trusted}\\\textbf{Setup}} &
 \makecell{\textbf{PQ}\\\textbf{Secure}} &
 \textbf{Effort} \\
 \midrule
-None (``hash based'') & SHA256 & 10 000\textsuperscript{*} & 10MB & $O(n)$ & No & Yes & N/A \\
-CIRCOM+Groth16         & Poseidon & 25 & 250b & $O(1)$ & Yes & No & Lower \\
-Gnark+Groth16          & Poseidon & 30 & 250b & $O(1)$ & Yes & No & Low \\
-SP1 zkVM  & SHA256 & 1.5 & 2MB & $O(\log n)$ & No & Yes & Lowest \\
-Cairo0 + STwo    & Poseidon2 & 60\textsuperscript{†} & 2.4MB & $O(\log n)$ & No & Yes & Medium \\
-AIR + Plonky3   & Poseidon2 & 10 000 & 1.7MB & $O(\log n)$ & No & Yes & High \\
-AIR + Plonky3   & Poseidon2 & 2500 & 670kB & $O(\log n)$ & No & Yes & High \\
-AIR + Plonky3   & Blake3 & 250 & 1.7MB & $O(\log n)$ & No & Yes & High \\
-
+None (``hash based'') & SHA-256 & 10\,000\textsuperscript{*} & 10\;MB & $O(n)$ & No & Yes & N/A \\
+CIRCOM + Groth16         & Poseidon & 25 & 250\;b & $O(1)$ & Yes & No & Lower \\
+Gnark + Groth16          & Poseidon & 30 & 250\;b & $O(1)$ & Yes & No & Low \\
+SP1 zkVM  & SHA-256 & 1.5 & 2\;MB & $O(\log n)$ & No & Yes & Lowest \\
+Cairo~0 + STwo    & Poseidon2 & 60\textsuperscript{†} & 2.4\;MB & $O(\log n)$ & No & Yes & Medium \\
+AIR + Plonky3\textsuperscript{‡}   & Poseidon2 & 10\,000 & 1.7\;MB & $O(\log n)$ & No & Yes & High \\
+AIR + Plonky3\textsuperscript{‡}   & Poseidon2 & 2500 & 0.7\;MB & $O(\log n)$ & No & Yes & High \\
+AIR + Plonky3   & Blake3 & 250 & 1.7\;MB & $O(\log n)$ & No & Yes & High \\
 \bottomrule
 \end{tabular}
 
 \vspace{0.5em}
 \raggedright
-\textsuperscript{*} Bandwidth limited\\
-\textsuperscript{†} Trace generation before proving is impractically slow.
+\textsuperscript{*} Bandwidth-limited.\\
+\textsuperscript{†} Trace generation before proving is impractically slow.\\
+\textsuperscript{‡} See Section~\ref{sec:performance-indication} for details.
 \end{table*}
 
 
@@ -117,13 +117,13 @@ AIR + Plonky3   & Blake3 & 250 & 1.7MB & $O(\log n)$ & No & Yes & High \\
 
 \section{System Architecture}
 
-To prevent the double-spending of tokens, the Unicity Infrastructure permanently\footnote{Permanent from the perspective of a token, meaning for a duration exceeding the token's lifetime.} records a unique identifier for every spent token state. This identifier is the cryptographic hash of the token state data. If a user attempts to double-spend a token, the resulting identifier will be identical to the one already recorded, making it impossible to obtain a new Proof of Unicity. A transaction is considered invalid unless it is accompanied by a valid Proof of Unicity.
+To prevent double-spending of tokens, the Unicity Infrastructure permanently\footnote{Permanent from the perspective of a token, meaning for a duration exceeding the token's lifetime.} records a unique identifier for every spent token state. This identifier is the cryptographic hash of the token state data. If a user attempts to double-spend a token, the resulting identifier will be identical to the one already recorded, making it impossible to obtain a new Proof of Unicity. A transaction is considered invalid unless it is accompanied by a valid Proof of Unicity.
 
 The rest of the processing---executing transactions, running smart contracts, etc.---can happen at the client layer, executed by users or ``agents''. Agents are themselves the interested parties in data availability and transaction validation, and they choose the ordering of incoming messages for processing. Thus, the Unicity Infrastructure is relieved of these duties, removing a major scaling bottleneck of traditional L1 blockchains.
 
-The Unicity Infrastructure operates in a trust-minimized way by utilizing distributed authenticated data structures and cryptographic zero knowledge tools (SNARKs) for extra succinctness of messages and tokens. The Proof of Unicity is a fresh \emph{proof of inclusion} of the token state being spent. This can be efficiently generated based on a Merkle Tree data structure. The proof size is logarithmic with respect to the tree's capacity, making it highly efficient. If the tree root is securely fixed, the integrity of the rest of the tree can be verified trustlessly: it is computationally infeasible to generate a valid inclusion proof for an element not present in the tree, without changing the root, or breaking underlying cryptographic assumptions. The infrastructure also supports \textit{non-inclusion proofs}, making it possible to prove to other parties that a particular token state has not yet been spent. The Unicity Infrastructure can thus be conceptualized as a large-scale, distributed Sparse Merkle Tree (SMT). Specifically, the tree is implemented as an indexed variant with some optimizations, In this paper, without the loss of generality, we model the distributed tree as an SMT. Furthermore, an SMT is straightforward to shard: the tree is partitionable vertically into slices. Leaves remain at their deterministically computed positions, as an SMT is an indexed data structure. Each leaf's identifier encodes its address in the tree, and leaf's shard address is a prefix of the identifier.
+The Unicity Infrastructure operates in a trust-minimized way by utilizing distributed authenticated data structures and cryptographic zero-knowledge tools (SNARKs) for extra succinctness of messages and tokens. The Proof of Unicity is a fresh \emph{proof of inclusion} of the token state being spent. This can be efficiently generated based on a Merkle Tree data structure. The proof size is logarithmic with respect to the tree's capacity, making it highly efficient. If the root of the tree is securely fixed, the integrity of the rest of the tree can be verified trustlessly: it is computationally infeasible to generate a valid inclusion proof for an element not present in the tree, without changing the root, or breaking underlying cryptographic assumptions. The infrastructure also supports \textit{non-inclusion proofs}, making it possible to prove to other parties that a particular token state has not yet been spent. The Unicity Infrastructure can thus be conceptualized as a large-scale, distributed Sparse Merkle Tree (SMT). Specifically, the tree is implemented as an indexed variant with some optimizations. In this paper, without the loss of generality, we model the distributed tree as an SMT. Furthermore, an SMT is straightforward to shard: the tree is partitionable vertically into slices. Leaves remain at their deterministically computed positions, as an SMT is an indexed data structure. Each leaf's identifier encodes its address in the tree, and the leaf's shard address is a prefix of the identifier.
 
-Aggregation Layer connects to the Consensus Layer. For fully trustless operation, each request is accomplished by a cryptographic proof of SMT consistency.
+Aggregation Layer connects to the Consensus Layer. For fully trustless operation, each request is accompanied by a cryptographic proof of SMT consistency.
 
 \begin{figure}[!htbp]
     \centering
@@ -140,13 +140,13 @@ Aggregation Layer connects to the Consensus Layer. For fully trustless operation
 
 
 \subsection{Consensus Layer}
-Decentralization is achieved by a Proof-of-Work (PoW) blockchain instance which manages consensus, including the validator selection for the BFT finality gadget, native token (ALPHA), executing tokenomics plan, and validator incentive handling. PoW is specifically robust during the bootstrapping of a decentralized system: when the number of validators fluctuates, the financial value of tokens is low, and token distribution is relatively concentrated. PoW shows great liveness properties. At the same time, PoW chains do not provide fast and deterministic finality: many blocks of confirmations are needed to achieve a reasonable level of certainty. In Unicity, this is mitigated by including a BFT ``finality gadget'' which runs rather fast, and the finality of transactions below is defined by the consensus of the BFT cluster.
+Decentralization is achieved by a Proof-of-Work (PoW) blockchain instance which manages consensus, including the validator selection for the BFT finality gadget, implementing the native token, executing the tokenomics plan, and handling the validator incentives. PoW is specifically robust during the bootstrapping of a decentralized system: when the number of validators fluctuates, the financial value of tokens is low, and token distribution is relatively concentrated. PoW shows great liveness properties. At the same time, PoW chains do not provide fast and deterministic finality: many blocks of confirmations are needed to achieve a reasonable level of certainty. In Unicity, this is mitigated by including a BFT ``finality gadget'' which runs rather fast, and the finality of transactions below is defined by the consensus of the BFT cluster.
 
 The PoW layer provides permissionlessness, a core property of decentralized blockchains. Any validator can actively participate in mining, and blocks are chosen based on the longest-chain rule. By selecting a PoW mining puzzle that is resistant to acceleration by GPUs and ASICs (specifically: RandomX~\cite{randomx}), we aim to further democratize the participation in the network.
 
-PoW chains encounter rollbacks ("reorgs") when alternative chains with a greater cumulative PoW work emerge. Limiting the maximum length of alternative chains creates the risk of involuntary forking---both alternative chains may be too long for a rollback. This risk is specifically mitigated by a finality gadget. On the other hand, PoW chains are extremely robust. If any number of validators leave or join the network, the chain continues to grow, and the block rate eventually adjusts to the new total mining power. In short, PoW trades liveness for safety.
+PoW chains encounter rollbacks (``reorgs'') when alternative chains with a greater cumulative PoW work emerge. Limiting the maximum length of alternative chains creates the risk of involuntary forking---both alternative chains may be too long for a rollback. This risk is specifically mitigated by a finality gadget. On the other hand, PoW chains are extremely robust. If any number of validators leave or join the network, the chain continues to grow, and the block rate eventually adjusts to the new total mining power. In short, PoW trades liveness for safety.
 
-The purpose of BFT consensus layer is twofold: 1) to provide deterministic (one-block) finality for the layers below, and 2) to achieve a fast and predictable block rate. BFT consensus trades liveness for safety: it is more fragile, as its liveness depends on a supermajority (e.g., two-thirds) of validators being online and cooperative at any moment.
+The purpose of BFT consensus layer is twofold: 1) to provide deterministic (one-block) finality for the layers below, and 2) to achieve a fast and predictable block rate. BFT consensus trades liveness for safety: it is more fragile, as its liveness depends on a supermajority (e.g., two thirds) of validators being online and cooperative at any moment.
 
 The usual way to achieve \emph{permissionless} BFT consensus is to use a Proof-of-Stake (PoS) setup. This can be delicate, especially during the launch of a blockchain protocol: there are known weaknesses like ``nothing at stake attack'', and risk of centralization. PoW-based protocols (and longest-chain-rule protocols in general) are more robust and well-suited for achieving a wide initial token distribution and establishing token value for effective decentralization.
 
@@ -160,13 +160,13 @@ Consensus Layer validators receive their block rewards at the ends of epochs. It
 
 The introduction of economic security mechanisms is a logical step toward evolving the Consensus Layer into a full Proof-of-Stake (PoS) system, once the chain is stable and token distribution reasonably diversified. A PoS system would provide stronger economic security for the BFT nodes while being more energy-efficient and environmentally responsible than PoW mining.
 
-The switch to PoS includes following steps: 1) Introducing the staking mechanism to create economic security for the BFT layer 2) alternative ledger for the native token securing and decentralizing the system, and executing the tokenomics plan there, 3) selecting BFT validators based on the stake; 4) incentives (block rewards, optional slashing) 5) migrating the token balances, and 5) sunsetting the PoW chain.
+The switch to PoS includes the following steps: 1) introducing the staking mechanism to create economic security for the BFT layer, 2) alternative ledger for the native token securing and decentralizing the system, and executing the tokenomics plan there, 3) selecting BFT validators based on the stake, 4) adjusting incentives (block rewards, optional slashing), 5) migrating the token balances, and 5) sunsetting the PoW chain.
 
 \subsection{Aggregation Layer}
 
-The Aggregation Layer (also called the SMT) implements a global, append-only key-value store that immutably records every spent token state. More specifically, it provides the following services: 1) recording of key-value tuples, where the key identifies a token state and value is recording some meta-data. 2) returning inclusion proofs of keys, 3) returning non-inclusion proofs of keys not present in the store.
+The Aggregation Layer (also called the SMT) implements a global, append-only key-value store that immutably records every spent token state. More specifically, it provides the following services: 1) recording of key-value tuples where the key identifies a token state and value is recording some meta-data, 2) returning inclusion proofs of keys, 3) returning non-inclusion proofs of keys not present in the store.
 
-The Aggregation Layer periodically certifies its state authenticator by the Consensus Layer.
+The Aggregation Layer periodically has its state authenticator certified by the Consensus Layer.
 
 \begin{figure*}[!t]
     \centering
@@ -174,9 +174,9 @@ The Aggregation Layer periodically certifies its state authenticator by the Cons
     \caption{Sharded architecture of the Aggregation Layer.}\label{fig:sharding}
 \end{figure*}
 
-The Aggregation layer is sharded based on keyspace slices and can be made hierarchical, as shown in Fig.~\ref{fig:sharding}.
+The Aggregation layer is sharded based on keyspace slices and can be made hierarchical, as shown in Figure~\ref{fig:sharding}.
 
-\emph{Proof of non-deletion}: Once a key is set, it has to remain there forever. Every state change of the Aggregation Layer (or a slice thereof) is accompanied by a cryptographic proof establishing that pre-existing keys have not been altered, only new keys were added. The size of this proof is logarithmic with respect to the tree's capacity and linear with respect to the size of the inclusion batch. This can be reduced to a constant size using a SNARK. Assuming correct validation of the non-deletion proof and chaining of the Aggregation Layer's state roots by the Consensus Layer, the Aggregation Layer can be considered trustless.
+\emph{Proof of non-deletion}: Once a key is set, it has to remain there forever. Every state change of the Aggregation Layer (or a slice thereof) is accompanied by a cryptographic proof establishing that pre-existing keys have not been removed or their values altered, only new keys were added. The size of this proof is logarithmic with respect to the tree's capacity and linear with respect to the size of the inclusion batch. This can be reduced to a constant size using a SNARK. Assuming correct validation of the non-deletion proof and chaining of the Aggregation Layer's state roots by the Consensus Layer, the Aggregation Layer can be considered trustless.
 
 
 \subsection{Execution Layer}
@@ -195,8 +195,6 @@ An append-only accumulator operates in batches $B = (k_1, k_2, \ldots, k_j)$, ac
 
 After each batch of additions, the new root of the Aggregation Layer's SMT is certified by the BFT finality gadget, ensuring its uniqueness and immutability. This provides a secure trust anchor for all consistency, inclusion, and non-inclusion proofs. The idealized Consensus Layer is modeled as Algorithm~\ref{alg:consensuslayer}.
 
-
-The Aggregation Layer implements an authenticated, append-only dictionary data structure.
 
 \begin{figure}[!htbp]
     \centering
@@ -219,17 +217,17 @@ The Aggregation Layer implements an authenticated, append-only dictionary data s
             } -- ([xshift=0.4cm]users.north);
 
 \end{tikzpicture}
-    \caption{The Security Model of the Aggregation Layer.}\label{fig:model}
+    \caption{Security model of the Aggregation Layer.}\label{fig:model}
 \end{figure}
 
-It authenticates incoming state transfer certification requests by verifying if the sender possesses the private key corresponding to the public key that identifies the current token owner. The specific authentication protocol is beyond the scope of this paper.
+The Aggregation Layer implements an authenticated, append-only dictionary data structure.
+It authenticates incoming state transfer certification requests by verifying that the sender possesses the private key corresponding to the public key that identifies the current token owner. The specific authentication protocol is beyond the scope of this paper.
 
 Authenticated requests are processed in batches, denoted as $B_i$. At the end of each batch, the Aggregation Layer produces its summary root hash $r_i$ and sends it to the Consensus Layer for certification. A certification request $(r_i, r_{i-1}, \pi)$ includes: 1) the previous state root hash, 2) the new state root hash, 3) a consistency proof of the changes made during the batch, and 4) an authenticator that identifies the operator.
 
 The Consensus Layer certifies the request only if it uniquely \textit{extends} a previously certified state root and the consistency proof is valid. It returns a certificate $c = (i, r_i, r_{i-1}; s_{\textsf{cl}})$, where $s_{\textsf{cl}}$ is a signature from the Consensus Layer (e.g., a threshold signature from the consensus nodes or a proof of inclusion in a finalized block).
 
 Each state can be extended only once, which prevents forks within the Aggregation Layer. Each subsequent round extends the most recently certified state.
-
 We model the Consensus Layer as an oracle, as shown in Algorithm~\ref{alg:consensuslayer}.
 
 \begin{algorithm}[tbh]
@@ -263,7 +261,7 @@ If each state transition is accompanied by a cryptographic proof of non-deletion
 
 \subsection{``Maximalist'' Security Assumptions}
 
-Here we assume model where user has the ability to validate all aspects of the system operation, analogous to the highest standards of trustlessness introduced by the Bitcoin~\cite{bitcoin}, where ``client'' is actually a full validator of the system, and starts with downloading and validating the blockchain from the genesis block.
+Here we assume a model where users have the ability to validate all aspects of the system operation, analogous to the highest standards of trustlessness introduced by Bitcoin~\cite{bitcoin} where each ``client'' is actually a full validator of the system, and starts with downloading and validating the blockchain from the genesis block.
 
 In a scalable system, such level of trustlessness is only possible with the help of cryptographic zero-knowledge proofs, which allow to verify the correctness of the system operation in more succinct way.
 
@@ -289,11 +287,11 @@ Proof verification works as follows:
 
 \begin{enumerate}
     \item Verify the authenticity of the state roots $r_{i-1}$ and $r_i$ (e.g., by checking their certification by the Consensus Layer).
-    \item Build an incomplete SMT tree: for each item in $B_i$, we insert the value of an empty leaf at the appropriate position.
-    \item All necessary siblings necessary to compute the root are available in $\pi_i$. Compute the root, compare with $r_{i-1}$; if not equal then the proof is not valid.
-    \item Build again an incomplete SMT tree; for each item in $B_i$, we insert the value of each key into the appropriate position.
+    \item Build an incomplete SMT tree: for each item in $B_i$, insert the value of an empty leaf at the appropriate position.
+    \item All siblings needed to compute the root are available in $\pi_i$. Compute the root, compare with $r_{i-1}$; if not equal then the proof is not valid.
+    \item Build again an incomplete SMT tree; for each item in $B_i$, insert the value of the key into the appropriate position.
     \item Compute the root based on siblings in $\pi_i$. If the root is not equal to $r_i$ then the proof is not valid.
-    \item The proof is valid if the checks above passed
+    \item The proof is valid if the checks above passed.
 \end{enumerate}
 
 A valid proof demonstrates that, given authentic roots $r_{i-1}$ and $r_i$, the keys in $B_i$ corresponded to empty leaves prior to the update, and that after the update, the values in $B_i$ were recorded at the positions defined by their respective keys, and there were no other changes.
@@ -305,8 +303,9 @@ Complete verification algorithm is presented as Algorithm~\ref{alg:verifynondele
   \begin{algorithmic}[0]
     \Function{VerifyNonDeletion}{$\pi, r_{i-1}, r_i, P$}
       \State   \Comment{Proof $\pi$ is an array of dictionaries}
-      \State   \Comment{Insertion batch $P$ is sorted array of key-value tuples}
-      \State $p_\varnothing \gets \{(k, \varnothing) \mid (k, v) \in P\}$ \Comment{empty leaves}
+      \State   \Comment{Insertion batch $P$ is }
+      \State   \Comment{sorted array of key-value tuples}
+      \State $p_\varnothing \gets \{(k, \varnothing) \mid (k, v) \in P\}$ \Comment{Empty leaves}
       \State $r_\varnothing \gets$ \Call{ComputeForest}{$\pi, p_\varnothing$}
       \State \textbf{assert} $r_\varnothing = r_{i-1}$
       \State \Comment{Same with batch's leaves populated}
@@ -326,8 +325,8 @@ Complete verification algorithm is presented as Algorithm~\ref{alg:verifynondele
           \State $k_s \gets 2k_p + (1 - \text{is\_right})$ \Comment{Sibling key}
           \If{$\lnot \text{is\_right} \land |p| > j+1 \land p[j+1].k = k_s$\\ \hskip 4em}
                                          \Comment{Special case: }
-            \State $v_s \gets p[i+1].v$  \Comment{right sibling is next}
-            \State $j \gets j + 1$       \Comment{jump over.}
+            \State $v_s \gets p[i+1].v$  \Comment{right sibling next}
+            \State $j \gets j + 1$       \Comment{Jump over}
           \Else                          \Comment{Get sibling value from proof,}
             \State                       \Comment{assign $\varnothing$ if not in layer's dict}
             \State $v_s \gets \pi[\ell].\text{get}(k_s).\text{or\_else}( \varnothing)$
@@ -347,18 +346,18 @@ Complete verification algorithm is presented as Algorithm~\ref{alg:verifynondele
 
 \section{(ZK)-SNARKs}
 
-By using an appropriate cryptographic SNARK, the size of the consistency proof can be reduced to a constant. The proof generation time is a function of the SMT depth (logarithmic in capacity) and the maximum batch size.
+By using an appropriate cryptographic SNARK system, the size of the consistency proof can be reduced to a constant.
 
-The statement to be proven in zero-knowledge is the consistency proof verification algorithm described in the previous section. The public inputs to the proof (the instance) are the pre- and post-update roots $(r_{i-1}, r_i)$. The private input (the witness) $\omega$ is the insertion batch $B_i$ and the set of sibling nodes (proof) $\pi_i$. While ZK-SNARKs can hide the witness, this zero-knowledge property is not a requirement for our use case; we are primarily interested in the proof's succinctness.
+The statement to be proven in zero-knowledge is the correct execution of the consistency proof verification algorithm described in the previous section. The public inputs to the proof (the instance) are the pre- and post-update roots $(r_{i-1}, r_i)$. The private input (the witness) $\omega$ is the insertion batch $B_i$ and the set of sibling nodes (proof) $\pi_i$. While ZK-SNARKs can hide the witness, this zero-knowledge property is not a requirement for our use case; we are primarily interested in the proof's succinctness.
 
 In an experiment~\cite{snark}, the statement is implemented as a constraint system $R$ using the CIRCOM domain-specific language. The witness is generated based on $\pi_i$ and $B_i$, and is supplemented by control wires that define how individual hashing blocks in the circuit are connected to the previous layer and to the inputs. If all constraints are satisfied, the proof is valid.
 
-The proving system used is Groth16\footnote{\url{https://eprint.iacr.org/2016/260}}, which is known for its small proof size. The proving time depends on the depth of the SMT and the maximum size of the insertion batch. Importantly, the proving effort does not depend on the total capacity of the SMT, enabling fairly large instantiations.
+The proving system used is Groth16~\cite{cryptoeprint:2016/260}, which is known for its small proof size. The proving time depends on the depth of the SMT (logarithmic in its capacity) and the maximum size of the insertion batch. Importantly, the proving effort does not depend on the total capacity of the SMT, enabling fairly large instantiations.
 
 When the Consensus Layer verifies these succinct consistency proofs, the Aggregation Layer operates trustlessly. However, redundancy is still required to ensure data availability of the SMT itself.
 
 
-\section{Circuit-based SNARK Definition}
+\section{Circuit-Based SNARK Definition}
 
 Due to the limited expressivity of an arithmetic circuit (e.g., no data-dependent loops or real branching), the entire computation flow must be fixed at circuit-creation time. It is therefore helpful to pre-process the inputs to create a fixed execution trace.
 
@@ -395,23 +394,23 @@ Each hashing cell in the circuit, as depicted in Figure~\ref{fi:smt-circuit-cell
 
 The MUX inputs for the leaf layer of the first half are connected to a vector containing:
 \begin{itemize}
-    \item The `empty' leaf value ($0$).
+    \item The ``empty'' leaf value ($0$).
     \item All new leaves in the batch, which are mapped to `empty' ($0$).
-    \item The `proof' or sibling hashes ($\pi_i$).
+    \item The ``proof'' or sibling hashes ($\pi_i$).
 \end{itemize}
 
 The MUX inputs for the leaf layer of the second half are connected to a vector containing:
 \begin{itemize}
-    \item The `empty' leaf value ($0$).
+    \item The ``empty'' leaf value ($0$).
     \item The batch of new leaves ($I$).
-    \item The identical `proof' or sibling hashes ($\pi_i$).
+    \item The identical ``proof'' or sibling hashes ($\pi_i$).
 \end{itemize}
 
 The MUXes for internal layers are connected to a vector containing:
 \begin{itemize}
-    \item The `empty' leaf value ($0$).
+    \item The ``empty'' leaf value ($0$).
     \item Output hashes from the previous layer's cells.
-    \item The `proof' or sibling hashes ($\pi_i$).
+    \item The ``proof'' or sibling hashes ($\pi_i$).
 \end{itemize}
 
 Both halves' MUXes are controlled by the same wiring signal.
@@ -421,11 +420,11 @@ Both halves' MUXes are controlled by the same wiring signal.
 Initial benchmarks on a consumer laptop (Apple M1) using the Poseidon hash function indicate a proving throughput of up to $25$ transactions per second.
 
 
-\section{Execution Trace-based STARK}
+\section{Execution Trace-Based STARK}
 
 An alternative to a bespoke arithmetic circuit is to use a general-purpose zero-knowledge virtual machine (zkVM). In this approach, the verification logic is written as a traditional imperative program (e.g., in Rust). The zkVM then generates a proof of correct execution for that program.
 
-We have implemented the non-deletion proof verification algorithm as a Rust program~\cite{stark} to be proved by the SP1 zkVM~cite{sp1}. As a commitment to the ``right'' program we use a prover key, generated during program setup. Its contents are: a commitment to the preprocessed traces, the starting Program Counter register, the starting global digest of the program, after incorporating the initial memory; the chip information, the chip ordering; and prover configuration.
+We have implemented the non-deletion proof verification algorithm as a Rust program~\cite{stark} to be proved by the SP1 zkVM~\cite{sp1}. As a commitment to the ``right'' program we use a prover key, generated during program setup. Its contents are: a commitment to the preprocessed traces, the starting Program Counter register, the starting global digest of the program, after incorporating the initial memory; the chip information, the chip ordering; and prover configuration.
 
 For verification, we obtain the prover key hash and authenticate it off-band.
 
@@ -433,7 +432,7 @@ For verification, we obtain the prover key hash and authenticate it off-band.
 After verifying the proof (\lstinline|client.verify(&proof, &vk)|), we can be sure that \lstinline|proof: SP1ProofWithPublicValues| is valid. The proof data structure embeds its validated ``instance'', or public parameters. Based on these parameters we check that indeed, the right thing was executed. In our case the instance is defined by the old root hash and the new root hash, which must be authenticated independently (i.e., using the certificate from Consensus Layer).
 %\end{sloppypar}
 
-The privacy of the witness (the zero-knowledge property) is not a requirement for this application. The primary goal is to achieve computational integrity and succinctness. Therefore, while the underlying technology is often referred to as `ZK', we are using it as a Scalable Transparent ARgument of Knowledge (STARK).
+The privacy of the witness (the zero-knowledge property) is not a requirement for this application. The primary goal is to achieve computational integrity and succinctness. Therefore, while the underlying technology is often referred to as ``ZK'', we are using it as a Scalable Transparent ARgument of Knowledge (STARK).
 
 
 \subsection{Optimization Ideas}
@@ -449,7 +448,7 @@ A possible optimization is to use ``ZK-friendly'' hash functions. These function
 
 Standardized cryptographic hash algorithms like SHA-2 were optimized mostly for minimal physical chip area, a design choice driven by NIST. Others, like the Blake family, were designed for fast execution on CPUs. They all include numerous bitwise operations (e.g., rotations, XOR) that are simple to implement in silicon logic but are notoriously inefficient to prove in ZK. Proving such operations can be expensive, as a full field element (e.g., a 254-bit value on the BN254 curve) must be used to represent a single bit.\footnote{See e.g. \url{https://github.com/iden3/circomlib/blob/master/circuits/sha256/sha256.circom}} ZK provers are most efficient with arithmetic operations native to the underlying finite field, such as addition and multiplication. Other operations must be implemented indirectly.
 
-There are some newer cryptographic hash functions specifically designed for ZK efficiency in mind. Functions like Poseidon and Poseidon2 are gaining acceptance but are still relatively new. Some are better on large fields (e.g.,Reinforced Concrete), some on smaller (e.g., Monolith) and depending on the proof system's lookup table support. Even newer and exhibiting even higher performance examples are Griffin, Anemoi. Some, like GMiMC, are offering a compromise with better silicon CPU performance.
+There are some newer cryptographic hash functions specifically designed for ZK efficiency in mind. Functions like Poseidon and Poseidon2 are gaining acceptance but are still relatively new. Some are better on large fields (e.g., Reinforced Concrete), some on smaller (e.g., Monolith) and depending on the proof system's lookup table support. Even newer and exhibiting even higher performance examples are Griffin, Anemoi. Some, like GMiMC, are offering a compromise with better silicon CPU performance.
 
 A key advantage of these hashes is that they operate directly on field elements, avoiding the costly translation from integer representations. The security level is defined by the underlying field and instantiation parameters. While some VMs, like the Cairo VM used by Starknet, provide direct access to field elements, they are often highly specialized for particular use cases, such as L2 rollups.
 
@@ -461,17 +460,18 @@ On a 10-core Apple M1 CPU, proving a 500-transaction batch using SHA-256 within 
 
 The overall approach is sound: the proving time depends on the size of the addition batch, and notably, it does not have linear relationship to the total capacity of the data structure. The verification algorithm is tight.
 
-To overcome the performance bottleneck, a ZK-friendly hash function is essential. The ideal proving framework would provide direct access to the native field elements of its arithmetization layer, a feature not typically available in general-purpose zkVMs. Execution trace generation must be highly efficient (a criterion that excludes older frameworks like Cairo 0). The prover itself must be fast. State-of-the-art uses small prime fields (e.g., BabyBear, Mersenne-31) and FRI-based polynomial commitment schemes, like Circle-STARKs~\cite{cryptoeprint:2024/278}. Promising implementations are Plonky3\footnote{\url{https://github.com/Plonky3/Plonky3}} and STwo\footnote{\url{https://github.com/starkware-libs/stwo}}. Considering the need for maturity, modularity, and an open-source license, Plonky3 emerges as the strongest option.
+To overcome the performance bottleneck, a ZK-friendly hash function is essential. The ideal proving framework would provide direct access to the native field elements of its arithmetization layer, a feature not typically available in general-purpose zkVMs. Execution trace generation must be highly efficient (a criterion that excludes older frameworks like Cairo~0). The prover itself must be fast. State-of-the-art uses small prime fields (e.g., BabyBear, Mersenne-31) and FRI-based polynomial commitment schemes, like Circle-STARKs~\cite{cryptoeprint:2024/278}. Promising implementations are Plonky3\footnote{\url{https://github.com/Plonky3/Plonky3}} and STwo\footnote{\url{https://github.com/starkware-libs/stwo}}. Considering the need for maturity, modularity, and an open-source license, Plonky3 emerges as the strongest option.
 
 To utilize the Plonky3 framework, the verification logic must be implemented as a custom AIR circuit (Algebraic Intermediate Representation) rather than a general-purpose program.
 
 \subsection{Performance Indication}
+\label{sec:performance-indication}
 
-Extrapolating from benchmarks of similar computations using the Plonky3 framework, Poseidon2 hash function, and a small finite field, the projected performance of such a stack on a 10-core CPU is approximately 10,000 tx/s. The parameter ``blowup factor'' is $2^1$, resulting in a 1.7 MB proof. A more conservative configuration with a blowup factor of $2^3$ would yield approximately 2,500 tx/s with a 670 kB proof, and higher memory requirements for the prover.
+Extrapolating from benchmarks of similar computations using the Plonky3 framework, Poseidon2 hash function, and a small finite field, the projected performance of such a stack on a 10-core CPU is approximately 10\,000\;tx/s. The parameter ``blowup factor'' is $2^1$, resulting in a 1.7\;MB proof. A more conservative configuration with a blowup factor of $2^3$ would yield approximately 2500\;tx/s with a 0.7\;MB proof and higher memory requirements for the prover.
 
 These figures indicate that operating the Aggregation Layer in a trustless manner is economically feasible.
 
-We note that the Poseidon family of hash functions is relatively new and has undergone less cryptographic analysis than traditional hash functions like the SHA2 or SHA3 families. However, among the new class of ZK-friendly arithmetic hash functions, Poseidon has undergone the most public scrutiny and can be tentatively considered secure for this type of application. It offers an estimated 50x improvement in proving performance compared to efficient standard hash function like Blake3.
+We note that the Poseidon family of hash functions is relatively new and has undergone less cryptographic analysis than traditional hash functions like the SHA-2 or SHA-3 families. However, among the new class of ZK-friendly arithmetic hash functions, Poseidon has undergone the most public scrutiny and can be tentatively considered secure for this type of application. It offers an estimated 50$\times$ improvement in proving performance compared to efficient standard hash function like Blake3.
 
 \section{Summary}
 
@@ -485,8 +485,8 @@ Different proof systems offer different trade-offs. The properties are: proving 
 \begin{axis}[
 axis lines = left,
 axis line style={->},
-xlabel = {inclusion batch size},
-ylabel = {proof size},
+xlabel = {Inclusion batch size},
+ylabel = {Proof size},
 xmin=0, xmax=10,
 ymin=0, ymax=10,
 xtick=\empty,
@@ -504,7 +504,6 @@ ytick=\empty,
 \end{tikzpicture}
     \caption{Proof size vs. use of ZK compression. Note that while STARKs produce generally larger proofs, they are typically faster to generate and do not depend on a trusted setup.}\label{fig:comp}
 \end{figure}
-
 
 \bibliographystyle{plain}
 \bibliography{aggregation-layer}

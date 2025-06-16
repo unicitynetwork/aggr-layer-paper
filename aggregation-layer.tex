@@ -192,12 +192,15 @@ The Execution Layer, also known as the Agent Layer, is responsible for executing
 
 \section{Aggregation Layer Security Model}
 
-\begin{definition}
-An append-only accumulator operates in batches $B = (k_1, k_2, \ldots, k_j)$, accepting new keys. The append-only accumulator is \emph{consistent}, if 1) during the insertion of a batch of updates, no existing leaves were modified or deleted; 2) it is possible to generate inclusion proofs $\pi^{\textsf{inc}}_{k \in \{B_1, \dots, B_i\}} = (v_k \leadsto r, c)$ for all previously inserted leaves, but not for \emph{fresh} leaves; 3) it is possible to generate non-inclusion proofs $\pi^{\overline{\textsf {inc}}}_{k \notin \{B_1, \dots, B_i\}} = (\varnothing_k \leadsto r, c)$ for all leaves not present in the accumulator, and only those leaves.
+The Aggregation Layer implements a distributed, authenticated, append-only dictionary data structure.
+It authenticates incoming state transfer certification requests by verifying that the sender possesses the private key corresponding to the public key that identifies the current token owner. The specific authentication protocol is beyond the scope of this paper.
+
+\begin{definition}[Consistency]
+An append-only accumulator operates in batches $B = (k_1, k_2, \ldots, k_j)$, accepting new keys. The append-only accumulator is \emph{consistent}, if 1) during the insertion of a batch of updates, no existing element was deleted or modified; 2) it is possible to generate inclusion proofs $\pi^{\textsf{inc}}_{k \in \{B_1, \dots, B_i\}} = (v_k \leadsto r, c)$ for all previously inserted elements, but not for non-existent elements; 3) it is possible to generate non-inclusion proofs $\pi^{\overline{\textsf {inc}}}_{k \notin \{B_1, \dots, B_i\}} = (\varnothing_k \leadsto r, c)$ for all elements not so far inserted to the accumulator, and not for those already inserted.
 \label{def:append-only-accumulator}
 \end{definition}
 
-
+When instantiated as a Sparse Merkle Tree (SMT), then $v_k \leadsto r$ is the hash chain from the value at $k$-th position to root $c$, and $\varnothing_k \leadsto r$ denotes the hash chain from the ``empty'' value at $k$-th position to root $c$.
 
 After each batch of additions, the new root of the Aggregation Layer's SMT is certified by the BFT finality gadget, ensuring its uniqueness and immutability. This provides a secure trust anchor for all consistency, inclusion, and non-inclusion proofs. The idealized Consensus Layer is modeled as Algorithm~\ref{alg:consensuslayer}.
 
@@ -226,10 +229,7 @@ After each batch of additions, the new root of the Aggregation Layer's SMT is ce
     \caption{Security model of the Aggregation Layer.}\label{fig:model}
 \end{figure}
 
-The Aggregation Layer implements an authenticated, append-only dictionary data structure.
-It authenticates incoming state transfer certification requests by verifying that the sender possesses the private key corresponding to the public key that identifies the current token owner. The specific authentication protocol is beyond the scope of this paper.
-
-Authenticated requests are processed in batches, denoted as $B_i$. At the end of each batch, the Aggregation Layer produces its summary root hash $r_i$ and sends it to the Consensus Layer for certification. A certification request $(r_i, r_{i-1}, \pi)$ includes: 1) the previous state root hash, 2) the new state root hash, 3) a consistency proof of the changes made during the batch, and 4) an authenticator that identifies the operator.
+For efficiency reasons client requests are processed in batches; the tree is re-calculated and the tree root is certified when a batch is closed. A batch of client requests is denoted as $B_i$. At the end of each batch, the Aggregation Layer produces its summary root hash $r_i$ and sends it to the Consensus Layer for certification. A certification request $(r_i, r_{i-1}, \pi)$ includes: 1) the previous state root hash, 2) the new state root hash, 3) a consistency proof of the changes made during the batch, and 4) an authenticator that identifies the operator.
 
 The Consensus Layer certifies the request only if it uniquely \textit{extends} a previously certified state root and the consistency proof is valid. It returns a certificate $c = (i, r_i, r_{i-1}; s_{\textsf{cl}})$, where $s_{\textsf{cl}}$ is a signature from the Consensus Layer (e.g., a threshold signature from the consensus nodes or a proof of inclusion in a finalized block).
 

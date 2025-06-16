@@ -4,6 +4,7 @@
 \usepackage{amsmath}
 \usepackage{amssymb}
 \usepackage{cite}
+\usepackage{flushend} % balance columns after references
 \usepackage{booktabs} % table
 \usepackage{makecell} % table cell wrapping
 \usepackage{listings}
@@ -51,7 +52,7 @@
 }
 
 \title{Unicity Infrastructure:\\
-    the Aggregation Layer}
+    the Proof Aggregation Layer}
 
 \author[1]{Risto Laanoja}
 \affil[1]{Unicity Labs}
@@ -63,17 +64,19 @@
 \maketitle
 
 \begin{abstract}
-Unicity is a novel blockchain protocol with the ambitious goal of enabling token transactions to occur off-chain and, potentially, offline. This premise requires supporting infrastructure to guarantee that there are no parallel states of assets, or more specifically, that there is no double-spending; a property we term the \textit{unicity}. It turns out that the lack of globally shared state and ordering reduces the blockchain overhead considerably. In designing this infrastructure, no compromises were made regarding its trust assumptions. This paper details the design of the Aggregation Layer, the component responsible for producing unicity certificates. We analyze its design for efficiency and evaluate the robustness of its trust and security model, and gains offered by cryptographic zero-knowledge tools.
+Unicity is a novel blockchain protocol with the ambitious goal of enabling token transactions to occur off-chain and, potentially, offline. This premise requires supporting infrastructure to guarantee that there are no parallel states of assets, or more specifically, that there is no double-spending; a property we term the \textit{unicity}. It turns out that the lack of globally shared state and ordering reduces the blockchain overhead considerably. In designing this infrastructure, no compromises were made regarding its trust assumptions. This paper details the design of the Proof Aggregation Layer, the component responsible for producing Proofs of Inclusion and Non-inclusion to the users. We analyze its design for efficiency and evaluate the robustness of its trust and security model, and gains offered by cryptographic zero-knowledge tools.
 \end{abstract}
 
 
 \section{Motivation}
 
-The foundational principle of the Unicity Network~\cite{wp} is to minimize the volume of on-chain data. This is based on the observation that shared (``on-chain'') state is unavoidable only to prevent double-spending.\footnote{This holds unless one employs centrally controlled, non-transparent technologies such as trusted hardware wallets or Trusted Execution Environments (TEEs).} The core tenets of Unicity also include minimizing trust requirements, enhancing user privacy, and providing linear scale.
+The foundational principle of the Unicity Network~\cite{wp} is to minimize the volume of on-chain data. This is based on the observation that shared (``on-chain'') state is unavoidable only to prevent double-spending.\footnote{Assuming no centrally controlled, non-transparent technologies such as trusted hardware wallets or Trusted Execution Environments (TEEs); and that anyone can be a recipient} The core tenets of Unicity also include minimizing trust requirements, enhancing user privacy, and providing linear scale.
 
-In a hierarchical trustless system, the principle is that the base layer (e.g., L1 blockchain with roll-ups) provides decentralization, and the layers below it present cryptographic proofs of correctness of their operation. In scaling Unicity we have designed efficient data structures to prove the correctness of operation of Aggregation Layer to the Consensus Layer. Based on cryptographic hashes alone, the consistency proof grows linearly in the relation to the number of user transactions. This sets a hard limit of approx. $10\;000$ tx/s where the Consensus Layer's networking bandwidth becomes the bottleneck. To scale further, we need to use cryptographic zero-knowledge proofs (ZKPs) to compress the consistency proof size. As an application of ZKPs, this is fundamentally more efficient than using ZKPs to compress the transaction data itself, as is done in many privacy coins and roll-ups. In this paper, we show how to scale the Aggregation Layer to $10\;000$ tx/s \emph{per shard}---this number is the proving throughput of one consumer-class computer, and due to small proof size and efficient verification, the Consensus Layer can serve practically unlimited number of such trustless shards.
+In a hierarchical trustless system, the principle is that the base layer (e.g., L1 blockchain with roll-ups) provides decentralization, while the layers below it present cryptographic proofs of the correctness of their operation. In scaling Unicity, we have designed efficient data structures to prove the correctness of operation of Aggregation Layer to the Consensus Layer. Based on cryptographic hashes alone, the consistency proof grows linearly with respect to the number of user transactions. This imposes a hard limit of approx. $10\;000$ transactions per second (tx/s), beyond which the networking bandwidth of the Consensus Layer becomes the bottleneck.
 
-Please refer to Table~\ref{tab:zk-comparison} for explorations comparing different technologies. There are more SNARKs and STARKs, we have picked subjectively the most appropriate proof schemes and supporting front-ends (``stacks''). Implementation effort is based on the subjective maturity and learning curve of the stack, also accounting for the implementation safety factor.
+To scale further, we must use cryptographic zero-knowledge proofs (ZKPs) to compress the size of the consistency proofs. As an application of ZKPs, this use-case is fundamentally more efficient than using ZKPs to compress the transaction data itself, as is done in many privacy coins and rollups.
+
+In this paper, we show how to scale the Aggregation Layer to $10\;000$ tx/s \emph{per shard}. This figure represents the proving throughput achievable on a single consumer-class computer. Due to the small proof size and efficient verification, the Consensus Layer can support a practically unlimited number of such trustless shards. Table~\ref{tab:zk-comparison} compares different ZKP technologies. We have picked subjectively the most appropriate proof schemes and supporting front-ends (``stacks''). The estimated implementation effort reflects the perceived maturity and learning curve; and the difficulty of producing safe implementations.
 
 
 \begin{table*}[h!]
@@ -158,13 +161,14 @@ In Unicity, the BFT layer operates at a much higher block rate than the PoW chai
 
 Consensus Layer validators receive their block rewards at the ends of epochs. It is possible to increase economic security by implementing slashing based on withheld PoW and Consensus Layer block rewards.
 
-\subsubsection{Consensus Roadmap}
+\subsubsection{Consensus Roadmap}\label{sec:consensus-roadmap}
+
 
 The introduction of economic security mechanisms is a logical step toward evolving the Consensus Layer into a full Proof-of-Stake (PoS) system, once the chain is stable and token distribution reasonably diversified. A PoS system would provide stronger economic security for the BFT nodes while being more energy-efficient and environmentally responsible than PoW mining.
 
 The switch to PoS includes the following steps: 1) introducing the staking mechanism to create economic security for the BFT layer, 2) alternative ledger for the native token securing and decentralizing the system, and executing the tokenomics plan there, 3) selecting BFT validators based on the stake, 4) adjusting incentives (block rewards, optional slashing), 5) migrating the token balances, and 5) sunsetting the PoW chain.
 
-\subsection{Aggregation Layer}
+\subsection{Proof Aggregation Layer}
 
 The Aggregation Layer (also called the SMT) implements a global, append-only key-value store that immutably records every spent token state. More specifically, it provides the following services: 1) recording of key-value tuples where the key identifies a token state and value is recording some meta-data, 2) returning inclusion proofs of keys, 3) returning non-inclusion proofs of keys not present in the store.
 
@@ -258,22 +262,54 @@ The Consensus Layer must guarantee data availability. If recent state roots were
 
 If each state transition is accompanied by a cryptographic proof of non-deletion (see Section~\ref{sec:consistency-proof}), the Aggregation Layer can be considered trustless.
 
-% TODO \subsection{``Pragmatist'' Security Assumptions}
 
 
 \subsection{``Maximalist'' Security Assumptions}
 
-Here we assume a model where users have the ability to validate all aspects of the system operation, analogous to the highest standards of trustlessness introduced by Bitcoin~\cite{bitcoin} where each ``client'' is actually a full validator of the system, and starts with downloading and validating the blockchain from the genesis block.
+Here we assume a model where users have the ability to validate all aspects of the system operation, relevant to particular user's assets. The trustlessness level is analogous to the highest standards of trustlessness introduced by Bitcoin~\cite{bitcoin} where each ``client'' is actually a full validator of the system, and starts with downloading and validating the blockchain from the genesis block.
 
-In a scalable system, such level of trustlessness is only possible with the help of cryptographic zero-knowledge proofs, which allow to verify the correctness of the system operation in more succinct way.
+The Root of Trust is PoW blockchain. Thus, a maximalist user maintains a full node of the PoW chain, and when he receives a token then the user must be able to efficiently verify if: 1) Token is valid (elaborated elsewhere), 2) the Aggregation layer is not forked, 3) Aggregation layer did not certify alternative states of his token.
 
-The Root of Trust is PoW blockchain.
+The 2nd point is achieved by validating the unique state root snapshot in PoW block header. It takes some time before the cumulative state snapshot appears and the block can be considered final, thus maximalist verification is not available immediately.
+
+The 3rd point is achieved by validating the correct operation of the Aggregation Layer, specifically if there were no Unicity Proofs generated for the token which are not recorded in the token history. To do so, all the non-deletion proofs from the token genesis to current state must be validated. This is made efficient by recursive ZK proof, showing that each round's non-deletion proof is valid and there were no rounds in between. Such recursive proof is generated periodically and made available with some delay.
+
+\subsection{Practical Security Assumptions}
+
+If we relax the model by trusting that a majority of BFT Consensus Nodes do not co-operate in malicious way to allow Aggregation Layer nodes to produce false proofs, it is possible to offer very practical system operation parameters. Inclusion Proof is returned within a few seconds, thus a transaction can be finalized and verified by anyone, without consulting any external data, within seconds.
+
+The Root of Trust is the set of BFT layer's epoch change records, which grows very slowly (e.g., once aggregated signature per day or week). Once switching to PoS (Section~\ref{sec:consensus-roadmap}), the Root of Trust remains the same.
 
 
-\section{Consistency Proof}
+\subsection{``Maximalist'' Security Assumptions}
+
+In this model, we assume that users are capable of validating all aspects of system operation that are relevant to their own assets. This level of trustlessness is close to the strong guarantees introduced by Bitcoin~\cite{bitcoin}, where each ``client'' functions as a full validator, starting from downloading and verifying the blockchain from the genesis block.
+
+The Root of Trust is a PoW blockchain. A maximalist user maintains a full node of this chain. Upon receiving a token, the user must be able to efficiently verify the following:
+
+\begin{enumerate}
+    \item The token is valid (as elaborated elsewhere),
+    \item The Aggregation Layer has not forked,
+    \item The Aggregation Layer has not certified conflicting states for the same token.
+\end{enumerate}
+
+The second point is addressed by validating a unique state root snapshot embedded in the PoW block header. Since the cumulative state snapshot appears with a delay, the block can only be considered final after a snapshot publishing and block confirmation period; hence, maximalist verification is not instantaneous.
+
+The third point is addressed by verifying the correct operation of the Aggregation Layer—specifically, ensuring that no Inclusion Proofs have been generated for the token that are not reflected in its recorded history. To achieve this, all non-deletion proofs from the token's genesis up to its current state must be validated. This is made efficient through the use of recursive zero-knowledge proofs (ZKPs), which demonstrate that each round’s non-deletion proof is valid and that no rounds were skipped from verification. These recursive proofs are generated periodically and are made available with considerable latency.
+
+\subsection{Practical Security Assumptions}
+
+If we relax the model by assuming that a majority of BFT consensus nodes do not collude maliciously with Aggregation Layer nodes to produce false proofs, the system can achieve significantly more practical operational parameters.
+
+In this scenario, an inclusion proof can be returned within a few seconds, allowing a transaction to be finalized and independently verified—without consulting external data—within the same timeframe.
+
+Here, the Root of Trust is defined by the set of epoch change records in the BFT consensus layer. These records grow very slowly (e.g., one aggregated signature per day or week). When transitioning to proof-of-stake (PoS) consensus (see Section~\ref{sec:consensus-roadmap}), the Root of Trust remains the same.
+
+
+\section{Non-deletion Proof}
 \label{sec:consistency-proof}
 
-A consistency proof is a cryptographic construction that validates one round of operation of  the append-only accumulator.
+A non-deletion proof is a cryptographic construction that validates one round of operation of  the append-only accumulator.
 
 We have the $i$-th batch of insertions $B_i = (k_1, k_2, \dots, k_j)$, where $k$ is an inserted item; all insertions are applied within a single operational round. The root hash before the round is $r_{i-1}$, and after the round is $r_i$. The accumulator is implemented as a Sparse Merkle Tree (SMT).
 
@@ -290,7 +326,7 @@ Proof verification works as follows:
 \begin{enumerate}
     \item Verify the authenticity of the state roots $r_{i-1}$ and $r_i$ (e.g., by checking their certification by the Consensus Layer).
     \item Build an incomplete SMT tree: for each item in $B_i$, insert the value of an empty leaf at the appropriate position.
-    \item All siblings needed to compute the root are available in $\pi_i$. Compute the root, compare with $r_{i-1}$; if not equal then the proof is not valid.
+    \item All non-computable siblings needed to compute the root are available in $\pi_i$. Compute the root, compare with $r_{i-1}$; if not equal then the proof is not valid.
     \item Build again an incomplete SMT tree; for each item in $B_i$, insert the value of the key into the appropriate position.
     \item Compute the root based on siblings in $\pi_i$. If the root is not equal to $r_i$ then the proof is not valid.
     \item The proof is valid if the checks above passed.
@@ -300,7 +336,7 @@ A valid proof demonstrates that, given authentic roots $r_{i-1}$ and $r_i$, the 
 
 Complete verification algorithm is presented as Algorithm~\ref{alg:verifynondeletion}.
 
-\begin{algorithm}[tb]
+\begin{algorithm}[htb]
   \caption{Verification of non-deletion proof}\label{alg:verifynondeletion}
   \begin{algorithmic}[0]
     \Function{VerifyNonDeletion}{$\pi, r_{i-1}, r_i, P$}
@@ -495,17 +531,28 @@ ymin=0, ymax=10,
 xtick=\empty,
 ytick=\empty,
 ]
-\addplot [red, thick, smooth] coordinates {(0,0)  (10,9)};
+\addplot [red, thick, smooth] coordinates {(0,0)  (5.5, 5)};
+\addplot [red, thick, dotted] coordinates {(5.5, 5)  (10,9)};
 \node [red, above left] at (axis cs:10,9) {hash-based  consistency proof};
 
-\addplot [purple, thick, smooth] coordinates {(0,2) (10,3)};
+\addplot [purple, thick, smooth] coordinates {(0,2) (7.5,2.8)};
+\addplot [purple, thick, dotted] coordinates {(7.5,2.8) (10,3)};
 \node [purple, above left] at (axis cs:10,3) {STARK};
 
-\addplot [blue, thick, smooth] coordinates {(0,1) (10,1)};
+\addplot [blue, thick, smooth] coordinates {(0,1) (3,1)};
+\addplot [blue, thick, dotted] coordinates {(3,1) (10,1)};
 \node [blue, above left] at (axis cs:10,1) {SNARK (e.g. Groth16)};
+
+% perf limits
+\addplot [dotted, thick] coordinates {(0,5) (10,5)};
+\node [above right] at (axis cs:0,5) {\it bandwidth limit};
+
+\addplot [dashed, thick] coordinates {(3, 0.25) (3, 1.75)}; % snark
+\addplot [dashed, thick] coordinates {(7.5, 2) (7.5, 4.3)};   % stark
+
 \end{axis}
 \end{tikzpicture}
-    \caption{Proof size vs. use of ZK compression. Note that while STARKs produce generally larger proofs, they are typically faster to generate and do not depend on a trusted setup.}\label{fig:comp}
+    \caption{Proof size vs. use of ZK compression. Dotted line is bandwidth limit, dashed line is compute limit (ZK scheme specific). Not to scale.}\label{fig:comp}
 \end{figure}
 
 \bibliographystyle{plain}

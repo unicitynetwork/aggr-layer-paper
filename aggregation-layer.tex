@@ -63,7 +63,7 @@
 \maketitle
 
 \begin{abstract}
-Unicity is a novel blockchain protocol with the ambitious goal of enabling token transactions to occur off-chain and, potentially, offline. This premise requires supporting infrastructure to guarantee that there are no parallel states of assets, or more specifically, that there is no double-spending; a property we term the \textit{unicity}. It turns out that the lack of globally shared state and ordering reduces the blockchain overhead considerably. In designing this infrastructure, no compromises were made regarding its trust assumptions. This paper details the design of the Aggregation Layer, the component responsible for producing unicity certificates. We analyze its design for efficiency and evaluate the robustness of its trust and security model, and gains offered by cryptographic zero-knowledge tools which are specifically efficient for the use-case.
+Unicity is a novel blockchain protocol with the ambitious goal of enabling token transactions to occur off-chain and, potentially, offline. This premise requires supporting infrastructure to guarantee that there are no parallel states of assets, or more specifically, that there is no double-spending; a property we term the \textit{unicity}. It turns out that the lack of globally shared state and ordering reduces the blockchain overhead considerably. In designing this infrastructure, no compromises were made regarding its trust assumptions. This paper details the design of the Aggregation Layer, the component responsible for producing unicity certificates. We analyze its design for efficiency and evaluate the robustness of its trust and security model, and gains offered by cryptographic zero-knowledge tools.
 \end{abstract}
 
 
@@ -71,8 +71,10 @@ Unicity is a novel blockchain protocol with the ambitious goal of enabling token
 
 The foundational principle of the Unicity Network~\cite{wp} is to minimize the volume of on-chain data. This is based on the observation that shared (``on-chain'') state is unavoidable only to prevent double-spending.\footnote{This holds unless one employs centrally controlled, non-transparent technologies such as trusted hardware wallets or Trusted Execution Environments (TEEs).} The core tenets of Unicity also include minimizing trust requirements, enhancing user privacy, and providing linear scale.
 
-% table with rows: different zk tech and parameters (blowup factor)
-% columns: proving speed (tx/s), proof size, asymptotics, trusted setup, pq secure, implementation effort
+In a hierarchical trustless system, the principle is that the base layer (e.g., L1 blockchain with roll-ups) provides decentralization, and the layers below it present cryptographic proofs of correctness of their operation. In scaling Unicity we have designed efficient data structures to prove the correctness of operation of Aggregation Layer to the Consensus Layer. Based on cryptographic hashes alone, the consistency proof grows linearly in the relation to the number of user transactions. This sets a hard limit of approx. $10\;000$ tx/s where the Consensus Layer's networking bandwidth becomes the bottleneck. To scale further, we need to use cryptographic zero-knowledge proofs (ZKPs) to compress the consistency proof size. As an application of ZKPs, this is fundamentally more efficient than using ZKPs to compress the transaction data itself, as is done in many privacy coins and roll-ups. In this paper, we show how to scale the Aggregation Layer to $10\;000$ tx/s \emph{per shard}---this number is the proving throughput of one consumer-class computer, and due to small proof size and efficient verification, the Consensus Layer can serve practically unlimited number of such trustless shards.
+
+Please refer to Table~\ref{tab:zk-comparison} for explorations comparing different technologies. There are more SNARKs and STARKs, we have picked subjectively the most appropriate proof schemes and supporting front-ends (``stacks''). Implementation effort is based on the subjective maturity and learning curve of the stack, also accounting for the implementation safety factor.
+
 
 \begin{table*}[h!]
 \centering
@@ -86,25 +88,25 @@ The foundational principle of the Unicity Network~\cite{wp} is to minimize the v
 \makecell{\textbf{Proof}\\\textbf{Size}} &
 \makecell{\textbf{Proof Size}\\\textbf{Asymptotics}} &
 \makecell{\textbf{Trusted}\\\textbf{Setup}} &
-\makecell{\textbf{PQ}\\\textbf{Secure}} &
-\textbf{Effort} \\
+%\makecell{\textbf{PQ}\\\textbf{Secure}} &
+\makecell{\textbf{Impl.}\\\textbf{Effort}} \\
 \midrule
-None (``hash based'') & SHA-256 & 10\,000\textsuperscript{*} & 10\;MB & $O(n)$ & No & Yes & N/A \\
-CIRCOM + Groth16         & Poseidon & 25 & 250\;b & $O(1)$ & Yes & No & Lower \\
-Gnark + Groth16          & Poseidon & 30 & 250\;b & $O(1)$ & Yes & No & Low \\
-SP1 zkVM  & SHA-256 & 1.5 & 2\;MB & $O(\log n)$ & No & Yes & Lowest \\
-Cairo~0 + STwo    & Poseidon2 & 60\textsuperscript{†} & 2.4\;MB & $O(\log n)$ & No & Yes & Medium \\
-AIR + Plonky3\textsuperscript{‡}   & Poseidon2 & 10\,000 & 1.7\;MB & $O(\log n)$ & No & Yes & High \\
-AIR + Plonky3\textsuperscript{‡}   & Poseidon2 & 2500 & 0.7\;MB & $O(\log n)$ & No & Yes & High \\
-AIR + Plonky3   & Blake3 & 250 & 1.7\;MB & $O(\log n)$ & No & Yes & High \\
+None (``hash based'') & SHA-256 & 10\,000\textsuperscript{*} & 10\;MB & $O(n)$ & No & N/A \\
+CIRCOM + Groth16         & Poseidon & 25 & 250\;b & $O(1)$ & Yes & Lower \\
+Gnark + Groth16          & Poseidon & 30 & 250\;b & $O(1)$ & Yes & Low \\
+SP1 zkVM  & SHA-256 & 1.5 & 2\;MB & $O(\log n)$ & No & Lowest \\
+Cairo~0 + STwo    & Poseidon2 & 60\textsuperscript{†} & 2.4\;MB & $O(\log n)$ & No & Medium \\
+AIR + Plonky3\textsuperscript{‡}   & Poseidon2 & 10\,000 & 1.7\;MB & $O(\log n)$ & No & High \\
+AIR + Plonky3   & Poseidon2 & 2500 & 0.7\;MB & $O(\log n)$ & No & High \\
+AIR + Plonky3   & Blake3 & 250 & 1.7\;MB & $O(\log n)$ & No & High \\
 \bottomrule
 \end{tabular}
 
 \vspace{0.5em}
 \raggedright
-\textsuperscript{*} Bandwidth-limited.\\
+\textsuperscript{*} Bandwidth-limited, no verification effort reduction\\
 \textsuperscript{†} Trace generation before proving is impractically slow.\\
-\textsuperscript{‡} See Section~\ref{sec:performance-indication} for details.
+\textsuperscript{‡} See Section~\ref{sec:custom-air-circuit} for details.
 \end{table*}
 
 
@@ -434,6 +436,10 @@ After verifying the proof (\lstinline|client.verify(&proof, &vk)|), we can be su
 
 The privacy of the witness (the zero-knowledge property) is not a requirement for this application. The primary goal is to achieve computational integrity and succinctness. Therefore, while the underlying technology is often referred to as ``ZK'', we are using it as a Scalable Transparent ARgument of Knowledge (STARK).
 
+\subsection{zkVM Performance}
+
+On a 10-core Apple M1 CPU, proving a 500-transaction batch using SHA-256 within the SP1 zkVM takes approximately 5 minutes. However, the SP1 framework is robust and designed for scalability, supporting distributed prover networks, industrial-grade GPUs, proof chunking and recursion, and other advanced features to tackle larger problems with brute force.
+
 
 \subsection{Optimization Ideas}
 
@@ -446,17 +452,14 @@ A possible optimization is to use ``ZK-friendly'' hash functions. These function
 
 \subsection{More on ZK and Hash Functions}
 
-Standardized cryptographic hash algorithms like SHA-2 were optimized mostly for minimal physical chip area, a design choice driven by NIST. Others, like the Blake family, were designed for fast execution on CPUs. They all include numerous bitwise operations (e.g., rotations, XOR) that are simple to implement in silicon logic but are notoriously inefficient to prove in ZK. Proving such operations can be expensive, as a full field element (e.g., a 254-bit value on the BN254 curve) must be used to represent a single bit.\footnote{See e.g. \url{https://github.com/iden3/circomlib/blob/master/circuits/sha256/sha256.circom}} ZK provers are most efficient with arithmetic operations native to the underlying finite field, such as addition and multiplication. Other operations must be implemented indirectly.
+Standardized cryptographic hash algorithms like SHA-2 were optimized mostly for minimal physical chip area, a design choice driven by NIST. Others, like the Blake family, were designed for fast execution on CPUs. They all include numerous bitwise operations (e.g., rotations, XOR) that are silicon logic-native but are notoriously inefficient to prove in ZK. Proving such operations is expensive, because a full field element (e.g., a 254-bit value on the BN254 curve) must be used to represent a single bit.\footnote{See e.g. \url{https://github.com/iden3/circomlib/blob/master/circuits/sha256/sha256.circom}} ZK provers are most efficient with arithmetic operations native to the underlying finite field, such as addition and multiplication (and lookups on some ZK stacks). Other operations must be implemented indirectly.
 
 There are some newer cryptographic hash functions specifically designed for ZK efficiency in mind. Functions like Poseidon and Poseidon2 are gaining acceptance but are still relatively new. Some are better on large fields (e.g., Reinforced Concrete), some on smaller (e.g., Monolith) and depending on the proof system's lookup table support. Even newer and exhibiting even higher performance examples are Griffin, Anemoi. Some, like GMiMC, are offering a compromise with better silicon CPU performance.
 
 A key advantage of these hashes is that they operate directly on field elements, avoiding the costly translation from integer representations. The security level is defined by the underlying field and instantiation parameters. While some VMs, like the Cairo VM used by Starknet, provide direct access to field elements, they are often highly specialized for particular use cases, such as L2 rollups.
 
-\subsection{Performance Indication}
 
-On a 10-core Apple M1 CPU, proving a 500-transaction batch using SHA-256 within the SP1 zkVM takes approximately 5 minutes. However, the SP1 framework is robust and designed for scalability, supporting distributed prover networks, industrial-grade GPUs, proof chunking and recursion, and other advanced features to tackle larger problems with brute force.
-
-\subsection{Performance Optimization}
+\subsection{Performance Roadmap}
 
 The overall approach is sound: the proving time depends on the size of the addition batch, and notably, it does not have linear relationship to the total capacity of the data structure. The verification algorithm is tight.
 
@@ -464,12 +467,12 @@ To overcome the performance bottleneck, a ZK-friendly hash function is essential
 
 To utilize the Plonky3 framework, the verification logic must be implemented as a custom AIR circuit (Algebraic Intermediate Representation) rather than a general-purpose program.
 
-\subsection{Performance Indication}
-\label{sec:performance-indication}
+\subsection{Custom AIR Circuit}
+\label{sec:custom-air-circuit}
 
-Extrapolating from benchmarks of similar computations using the Plonky3 framework, Poseidon2 hash function, and a small finite field, the projected performance of such a stack on a 10-core CPU is approximately 10\,000\;tx/s. The parameter ``blowup factor'' is $2^1$, resulting in a 1.7\;MB proof. A more conservative configuration with a blowup factor of $2^3$ would yield approximately 2500\;tx/s with a 0.7\;MB proof and higher memory requirements for the prover.
+Extrapolating from benchmarks of similar computations~\footnote{Experiment with iterative hashing and a hash-based signature scheme \url{https://github.com/han0110/hash-sig-agg/}} using the Plonky3 framework, Poseidon2 hash function, and a small finite field, the projected performance of such a stack on a 10-core CPU is approximately 10\,000\;tx/s. The parameter ``blowup factor'' is $2^1$, resulting in a 1.7\;MB proof. A more conservative configuration with a blowup factor of $2^3$ would yield approximately 2500\;tx/s with a 0.7\;MB proof and higher memory requirements for the prover.
 
-These figures indicate that operating the Aggregation Layer in a trustless manner is economically feasible.
+These figures indicate that operating very large-scale Aggregation Layer in a trustless manner is economically feasible.
 
 We note that the Poseidon family of hash functions is relatively new and has undergone less cryptographic analysis than traditional hash functions like the SHA-2 or SHA-3 families. However, among the new class of ZK-friendly arithmetic hash functions, Poseidon has undergone the most public scrutiny and can be tentatively considered secure for this type of application. It offers an estimated 50$\times$ improvement in proving performance compared to efficient standard hash function like Blake3.
 

@@ -65,7 +65,7 @@ jobs:
           tag: latest
           name: "Unicity Infrastructure - the Aggregation Layer technical report"
           body: |
-            - This release contains the latest compiled version of the Unicity Infrastructure - the Aggregation Layer technical report.
+            📄 This release contains the latest compiled version of the Unicity Infrastructure - the Aggregation Layer technical report.
             - Date: ${{ env.release_date }}
             - Commit: ${{ env.sha_short }}
           artifacts: aggregation-layer.pdf

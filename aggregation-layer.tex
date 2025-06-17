@@ -7,6 +7,7 @@
 \usepackage{flushend} % balance columns after references
 \usepackage{booktabs} % table
 \usepackage{makecell} % table cell wrapping
+\usepackage{enumitem} % nosep
 \usepackage{listings}
 \usepackage{xcolor}
 \usepackage{accsupp}
@@ -190,7 +191,7 @@ The Aggregation layer is sharded based on keyspace slices and can be made hierar
 The Execution Layer, also known as the Agent Layer, is responsible for executing transactions and other business logic, using the services of the Aggregation Layer and Unicity in general.
 
 
-\section{Aggregation Layer Security Model}
+\section{Security Model of the Aggregation Layer}
 
 The Aggregation Layer implements a distributed, authenticated, append-only dictionary data structure.
 It authenticates incoming state transfer certification requests by verifying that the sender possesses the private key corresponding to the public key that identifies the current token owner. The specific authentication protocol is beyond the scope of this paper.
@@ -263,47 +264,29 @@ The Consensus Layer must guarantee data availability. If recent state roots were
 If each state transition is accompanied by a cryptographic proof of non-deletion (see Section~\ref{sec:consistency-proof}), the Aggregation Layer can be considered trustless.
 
 
-
-\subsection{``Maximalist'' Security Assumptions}
-
-Here we assume a model where users have the ability to validate all aspects of the system operation, relevant to particular user's assets. The trustlessness level is analogous to the highest standards of trustlessness introduced by Bitcoin~\cite{bitcoin} where each ``client'' is actually a full validator of the system, and starts with downloading and validating the blockchain from the genesis block.
-
-The Root of Trust is PoW blockchain. Thus, a maximalist user maintains a full node of the PoW chain, and when he receives a token then the user must be able to efficiently verify if: 1) Token is valid (elaborated elsewhere), 2) the Aggregation layer is not forked, 3) Aggregation layer did not certify alternative states of his token.
-
-The 2nd point is achieved by validating the unique state root snapshot in PoW block header. It takes some time before the cumulative state snapshot appears and the block can be considered final, thus maximalist verification is not available immediately.
-
-The 3rd point is achieved by validating the correct operation of the Aggregation Layer, specifically if there were no Unicity Proofs generated for the token which are not recorded in the token history. To do so, all the non-deletion proofs from the token genesis to current state must be validated. This is made efficient by recursive ZK proof, showing that each round's non-deletion proof is valid and there were no rounds in between. Such recursive proof is generated periodically and made available with some delay.
-
-\subsection{Practical Security Assumptions}
-
-If we relax the model by trusting that a majority of BFT Consensus Nodes do not co-operate in malicious way to allow Aggregation Layer nodes to produce false proofs, it is possible to offer very practical system operation parameters. Inclusion Proof is returned within a few seconds, thus a transaction can be finalized and verified by anyone, without consulting any external data, within seconds.
-
-The Root of Trust is the set of BFT layer's epoch change records, which grows very slowly (e.g., once aggregated signature per day or week). Once switching to PoS (Section~\ref{sec:consensus-roadmap}), the Root of Trust remains the same.
-
-
 \subsection{``Maximalist'' Security Assumptions}
 
 In this model, we assume that users are capable of validating all aspects of system operation that are relevant to their own assets. This level of trustlessness is close to the strong guarantees introduced by Bitcoin~\cite{bitcoin}, where each ``client'' functions as a full validator, starting from downloading and verifying the blockchain from the genesis block.
 
-The Root of Trust is a PoW blockchain. A maximalist user maintains a full node of this chain. Upon receiving a token, the user must be able to efficiently verify the following:
+The Root of Trust is the PoW blockchain. A maximalist user maintains a full node of this chain. This is relatively lightweight, as the ``utility'' transactions are executed at the Execution Layer. Upon receiving a token, the user must be able to efficiently verify the following:
 
-\begin{enumerate}
+\begin{enumerate}[nosep]
     \item The token is valid (as elaborated elsewhere),
     \item The Aggregation Layer has not forked,
-    \item The Aggregation Layer has not certified conflicting states for the same token.
+    \item The Aggregation Layer has not certified conflicting states of the same token.
 \end{enumerate}
 
 The second point is addressed by validating a unique state root snapshot embedded in the PoW block header. Since the cumulative state snapshot appears with a delay, the block can only be considered final after a snapshot publishing and block confirmation period; hence, maximalist verification is not instantaneous.
 
-The third point is addressed by verifying the correct operation of the Aggregation Layer—specifically, ensuring that no Inclusion Proofs have been generated for the token that are not reflected in its recorded history. To achieve this, all non-deletion proofs from the token's genesis up to its current state must be validated. This is made efficient through the use of recursive zero-knowledge proofs (ZKPs), which demonstrate that each round’s non-deletion proof is valid and that no rounds were skipped from verification. These recursive proofs are generated periodically and are made available with considerable latency.
+The third point is addressed by auditing the operation of the Aggregation Layer—specifically, ensuring that no Inclusion Proofs have been generated for the token that are not reflected in its recorded history. To achieve this, all non-deletion proofs from the token's genesis up to its current state must be validated. This is made efficient through the use of recursive zero-knowledge proofs (ZKPs), which show that each round’s non-deletion proof is valid and that no rounds were skipped from verification. These recursive proofs are generated periodically and are made available with some latency.
 
 \subsection{Practical Security Assumptions}
 
-If we relax the model by assuming that a majority of BFT consensus nodes do not collude maliciously with Aggregation Layer nodes to produce false proofs, the system can achieve significantly more practical operational parameters.
+If we relax the model by assuming that a majority of BFT consensus nodes exhibit economically rational behavior and do not collude maliciously with the Aggregation Layer, the user can enjoy significantly more practical operational parameters. BFT layer forking (case 2 above) or certifying conflicting states (case 3 above) produces strong cryptographic evidence which is processed out of the critical path of serving users.
 
-In this scenario, an inclusion proof can be returned within a few seconds, allowing a transaction to be finalized and independently verified—without consulting external data—within the same timeframe.
+In this scenario, a transaction is finalized, and an inclusion proof is returned within a few seconds, allowing the transaction to be independently verified—without consulting external data\footnote{Previously obtained Root of Trust is used to validate future transactions}—within the same timeframe.
 
-Here, the Root of Trust is defined by the set of epoch change records in the BFT consensus layer. These records grow very slowly (e.g., one aggregated signature per day or week). When transitioning to proof-of-stake (PoS) consensus (see Section~\ref{sec:consensus-roadmap}), the Root of Trust remains the same.
+The Root of Trust is the set of epoch change records of the BFT consensus layer. These records grow slowly (e.g., one aggregated signature per day or week). When transitioning to proof-of-stake (PoS) consensus (see Section~\ref{sec:consensus-roadmap}), the Root of Trust remains the same.
 
 
 \section{Non-deletion Proof}

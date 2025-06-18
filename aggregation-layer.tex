@@ -4,7 +4,7 @@
 \usepackage{amsmath}
 \usepackage{amssymb}
 \usepackage{cite}
-\usepackage{flushend} % balance columns after references
+% \usepackage{flushend} % balance columns after references
 \usepackage{booktabs} % table
 \usepackage{makecell} % table cell wrapping
 \usepackage{enumitem} % nosep
@@ -65,7 +65,7 @@
 \maketitle
 
 \begin{abstract}
-Unicity is a novel blockchain protocol with the ambitious goal of enabling token transactions to occur off-chain and, potentially, offline. This premise requires supporting infrastructure to guarantee that there are no parallel states of assets, or more specifically, that there is no double-spending; a property we term the \textit{unicity}. It turns out that the lack of globally shared state and ordering reduces the blockchain overhead considerably. In designing this infrastructure, no compromises were made regarding its trust assumptions. This paper details the design of the Proof Aggregation Layer, the component responsible for producing Proofs of Inclusion and Non-inclusion to the users. We analyze its design for efficiency and evaluate the robustness of its trust and security model, and gains offered by cryptographic zero-knowledge tools.
+Unicity is a novel blockchain protocol with the ambitious goal of enabling token transactions to occur off-chain and, when necessary, offline. This premise requires supporting infrastructure to guarantee that there are no parallel states of assets, or more specifically, that there is no double-spending; a property we term the \textit{unicity}. It turns out that the lack of globally shared state and ordering reduces the blockchain overhead considerably. In designing this infrastructure, no compromises were made regarding its trust assumptions. This paper details the design of the Proof Aggregation Layer, the component responsible for producing Proofs of Inclusion and Non-inclusion to the users. We analyze its design for efficiency and evaluate the robustness of its trust and security model, and gains offered by cryptographic zero-knowledge tools.
 \end{abstract}
 
 
@@ -73,12 +73,11 @@ Unicity is a novel blockchain protocol with the ambitious goal of enabling token
 
 The foundational principle of the Unicity Network~\cite{wp} is to minimize the volume of on-chain data. This is based on the observation that shared (``on-chain'') state is unavoidable only to prevent double-spending.\footnote{Assuming no centrally controlled, non-transparent technologies such as trusted hardware wallets or Trusted Execution Environments (TEEs); and that anyone can be a recipient} The core tenets of Unicity also include minimizing trust requirements, enhancing user privacy, and providing linear scale.
 
-In a hierarchical trustless system, the principle is that the base layer (e.g., L1 blockchain with roll-ups) provides decentralization, while the layers below it present cryptographic proofs of the correctness of their operation. In scaling Unicity, we have designed efficient data structures to prove the correctness of operation of Aggregation Layer to the Consensus Layer. Based on cryptographic hashes alone, the consistency proof grows linearly with respect to the number of user transactions. This imposes a hard limit of approx. $10\;000$ transactions per second (tx/s), beyond which the networking bandwidth of the Consensus Layer becomes the bottleneck.
+In a hierarchical trustless system, the principle is that the base layer (e.g., L1 blockchain) provides decentralization, while the layers below it (e.g., rollups) present cryptographic proofs of the correctness of their operation. In scaling Unicity, we have designed efficient data structures to prove the correctness of operation of Aggregation Layer to the Consensus Layer. Based on cryptographic hashes alone, the consistency proof grows linearly with respect to the number of user transactions. This imposes a hard limit of approx. $10\,000$ transactions per second (tx/s), beyond which the networking bandwidth of the Consensus Layer becomes the bottleneck.
 
-To scale further, we must use cryptographic zero-knowledge proofs (ZKPs) to compress the size of the consistency proofs. As an application of ZKPs, this use-case is fundamentally more efficient than using ZKPs to compress the transaction data itself, as is done in many privacy coins and rollups.
+To scale further, we must use cryptographic zero-knowledge proofs (ZKPs) to compress the size of the consistency proofs. As an application of ZKPs, this use-case is fundamentally more efficient than using ZKPs to process the transaction data itself, as is done in many privacy coins and ZK-rollups.
 
-In this paper, we show how to scale the Aggregation Layer to $10\;000$ tx/s \emph{per shard}. This figure represents the proving throughput achievable on a single consumer-class computer. Due to the small proof size and efficient verification, the Consensus Layer can support a practically unlimited number of such trustless shards. Table~\ref{tab:zk-comparison} compares different ZKP technologies. We have picked subjectively the most appropriate proof schemes and supporting front-ends (``stacks''). The estimated implementation effort reflects the perceived maturity and learning curve; and the difficulty of producing safe implementations.
-
+In this paper, we show how to scale the Aggregation Layer to $10\,000$ tx/s \emph{per shard}. This figure represents the proving throughput achievable on a single consumer-class computer. Due to the small proof size and efficient verification, the Consensus Layer can support a practically unlimited number of such trustless shards. Table~\ref{tab:zk-comparison} compares different ZKP technologies. We have picked subjectively the most appropriate ZK schemes and supporting front-ends (``stacks'').
 
 \begin{table*}[h!]
 \centering
@@ -108,11 +107,13 @@ AIR + Plonky3   & Blake3 & 250 & 1.7\;MB & $O(\log n)$ & No & High \\
 
 \vspace{0.5em}
 \raggedright
-\textsuperscript{*} Bandwidth-limited, no verification effort reduction\\
+\textsuperscript{*} Bandwidth-limited, no verification effort reduction.\\
 \textsuperscript{†} Trace generation before proving is impractically slow.\\
 \textsuperscript{‡} See Section~\ref{sec:custom-air-circuit} for details.
 \end{table*}
 
+
+The estimated implementation effort reflects the perceived maturity and learning curve; and the difficulty of producing safe implementations.
 
 % zk use vs zk in L2
 
@@ -286,7 +287,7 @@ If we relax the model by assuming that a majority of BFT consensus nodes exhibit
 
 In this scenario, a transaction is finalized, and an inclusion proof is returned within a few seconds, allowing the transaction to be independently verified—without consulting external data\footnote{Previously obtained Root of Trust is used to validate future transactions}—within the same timeframe.
 
-The Root of Trust is the set of epoch change records of the BFT consensus layer. These records grow slowly (e.g., one aggregated signature per day or week). When transitioning to proof-of-stake (PoS) consensus (see Section~\ref{sec:consensus-roadmap}), the Root of Trust remains the same.
+The Root of Trust is the set of epoch change records of the BFT consensus layer. These records grow slowly (few aggregated signatures per week). When transitioning to proof-of-stake (PoS) consensus (see Section~\ref{sec:consensus-roadmap}), the Root of Trust remains the same.
 
 
 \section{Non-deletion Proof}
@@ -296,7 +297,7 @@ A non-deletion proof is a cryptographic construction that validates one round of
 
 We have the $i$-th batch of insertions $B_i = (k_1, k_2, \dots, k_j)$, where $k$ is an inserted item; all insertions are applied within a single operational round. The root hash before the round is $r_{i-1}$, and after the round is $r_i$. The accumulator is implemented as a Sparse Merkle Tree (SMT).
 
-The consistency proof generation for batch $B_i$ works as follows:
+The non-deletion proof generation for batch $B_i$ works as follows:
 
 \begin{enumerate}
     \item The new leaves in batch $B_i$ are inserted into the SMT.
@@ -367,15 +368,15 @@ Complete verification algorithm is presented as Algorithm~\ref{alg:verifynondele
 
 \section{(ZK)-SNARKs}
 
-By using an appropriate cryptographic SNARK system, the size of the consistency proof can be reduced to a constant.
+By using an appropriate cryptographic SNARK system, the size of the non-deletion proof can be reduced to a constant.
 
-The statement to be proven in zero-knowledge is the correct execution of the consistency proof verification algorithm described in the previous section. The public inputs to the proof (the instance) are the pre- and post-update roots $(r_{i-1}, r_i)$. The private input (the witness) $\omega$ is the insertion batch $B_i$ and the set of sibling nodes (proof) $\pi_i$. While ZK-SNARKs can hide the witness, this zero-knowledge property is not a requirement for our use case; we are primarily interested in the proof's succinctness.
+The statement to be proven in zero-knowledge is the correct execution of the non-deletion proof verification algorithm described in the previous section. The public inputs to the proof (the instance) are the pre- and post-update roots $(r_{i-1}, r_i)$. The private input (the witness) $\omega$ is the insertion batch $B_i$ and the set of sibling nodes (proof) $\pi_i$. While ZK-SNARKs can hide the witness, this zero-knowledge property is not a requirement for our use case; we are primarily interested in the proof's succinctness.
 
 In an experiment~\cite{snark}, the statement is implemented as a constraint system $R$ using the CIRCOM domain-specific language. The witness is generated based on $\pi_i$ and $B_i$, and is supplemented by control wires that define how individual hashing blocks in the circuit are connected to the previous layer and to the inputs. If all constraints are satisfied, the proof is valid.
 
 The proving system used is Groth16~\cite{cryptoeprint:2016/260}, which is known for its small proof size. The proving time depends on the depth of the SMT (logarithmic in its capacity) and the maximum size of the insertion batch. Importantly, the proving effort does not depend on the total capacity of the SMT, enabling fairly large instantiations.
 
-When the Consensus Layer verifies these succinct consistency proofs, the Aggregation Layer operates trustlessly. However, redundancy is still required to ensure data availability of the SMT itself.
+When the Consensus Layer verifies these succinct proofs, the Aggregation Layer operates trustlessly. However, certain redundancy is still required to ensure data availability of the SMT itself.
 
 
 \section{Circuit-Based SNARK Definition}

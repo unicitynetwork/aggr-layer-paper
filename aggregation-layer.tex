@@ -165,14 +165,13 @@ Consensus Layer validators receive their block rewards at the ends of epochs. It
 
 \subsubsection{Consensus Roadmap}\label{sec:consensus-roadmap}
 
-
 The introduction of economic security mechanisms is a logical step toward evolving the Consensus Layer into a full Proof-of-Stake (PoS) system, once the chain is stable and token distribution reasonably diversified. A PoS system would provide stronger economic security for the BFT nodes while being more energy-efficient and environmentally responsible than PoW mining.
 
 The switch to PoS includes the following steps: 1) introducing the staking mechanism to create economic security for the BFT layer, 2) alternative ledger for the native token securing and decentralizing the system, and executing the tokenomics plan there, 3) selecting BFT validators based on the stake, 4) adjusting incentives (block rewards, optional slashing), 5) migrating the token balances, and 5) sunsetting the PoW chain.
 
 \subsection{Proof Aggregation Layer}
 
-The Aggregation Layer (also called the SMT) implements a global, append-only key-value store that immutably records every spent token state. More specifically, it provides the following services: 1) recording of key-value tuples where the key identifies a token state and value is recording some meta-data, 2) returning inclusion proofs of keys, 3) returning non-inclusion proofs of keys not present in the store.
+The Aggregation Layer implements a global, append-only key-value store that immutably records every spent token state. More specifically, it provides the following services: 1) recording of key-value tuples where the key identifies a token state and value is recording some meta-data, 2) returning inclusion proofs of keys, 3) returning non-inclusion proofs of keys not present in the store.
 
 The Aggregation Layer periodically has its state authenticator certified by the Consensus Layer.
 
@@ -318,15 +317,18 @@ Proof verification works as follows:
 
 A valid proof demonstrates that, given authentic roots $r_{i-1}$ and $r_i$, the keys in $B_i$ corresponded to empty leaves prior to the update, and that after the update, the values in $B_i$ were recorded at the positions defined by their respective keys, and there were no other changes.
 
-Complete verification algorithm is presented as Algorithm~\ref{alg:verifynondeletion}.
+Complete verification algorithm is presented as Algorithm~\ref{alg:verifynondeletion}. Note that there are several assumptions: that the batch is sorted by keys; and the proof is an array of arrays of tuples, outer array divides siblings into depth layers and inner array is sorted by keys (first element of tuple).
+
+Due to the sparseness of the SMT we can further improve the encoding, for example, instead of checking if a node's sibling is the next item in layer's nodes or the next item in proof array or empty element otherwise, we just record a number--how many of the next siblings are empty elements (frequent close to the leaves when SMT is sparsely populated); and same with siblings (frequent close to the root).
 
 \begin{algorithm}[htb]
   \caption{Verification of non-deletion proof}\label{alg:verifynondeletion}
   \begin{algorithmic}[0]
     \Function{VerifyNonDeletion}{$\pi, r_{i-1}, r_i, P$}
-      \State   \Comment{Proof $\pi$ is an array of dictionaries}
-      \State   \Comment{Insertion batch $P$ is }
-      \State   \Comment{sorted array of key-value tuples}
+      \State   \Comment{Proof $\pi$ is a by-layer array of ...}
+      \State   \Comment{... sorted arrays of k-v tuples}
+      \State   \Comment{Insertion batch $P$ is ...}
+      \State   \Comment{... sorted array of k-v tuples}
       \State $p_\varnothing \gets \{(k, \varnothing) \mid (k, v) \in P\}$ \Comment{Empty leaves}
       \State $r_\varnothing \gets$ \Call{ComputeForest}{$\pi, p_\varnothing$}
       \State \textbf{assert} $r_\varnothing = r_{i-1}$
@@ -337,25 +339,28 @@ Complete verification algorithm is presented as Algorithm~\ref{alg:verifynondele
     \EndFunction
 
     \Function{ComputeForest}{$\pi, p$}
-      \For{$\ell \gets \text{tree\_depth}-1 \textbf{ to } 0$}
-        \State $p' \gets [\,]$
-        \State $j \gets 0$
-        \While{$j < |p|$}
-          \State $(k, v) \gets p[j]$
+      \For{$\ell \in \text{tree\_depth}$}
+        \State $p' \gets [\,]$     \Comment{computed nodes of parent layer}
+        \State $m \gets 0 ; n \gets 0$  \Comment{indices}
+        \While{$m < |p|$}
+          \State $(k, v) \gets p[m]$
           \State $k_p \gets \lfloor k / 2 \rfloor$ \Comment{Parent key}
           \State $\text{is\_right} \gets k \bmod 2$
           \State $k_s \gets 2k_p + (1 - \text{is\_right})$ \Comment{Sibling key}
-          \If{$\lnot \text{is\_right} \land |p| > j+1 \land p[j+1].k = k_s$\\ \hskip 4em}
-                                         \Comment{Special case: }
-            \State $v_s \gets p[i+1].v$  \Comment{right sibling next}
-            \State $j \gets j + 1$       \Comment{Jump over}
-          \Else                          \Comment{Get sibling value from proof,}
-            \State                       \Comment{assign $\varnothing$ if not in layer's dict}
-            \State $v_s \gets \pi[\ell].\text{get}(k_s).\text{or\_else}( \varnothing)$
+          \If{$\lnot \text{is\_right} \land |p| > m+1 \land p[m+1].k = k_s$\\ \hskip 4em}
+                \Comment{Right sibling is next}
+            \State $v_s \gets p[m+1].v$
+            \State $m \gets m + 1$       \Comment{Jump over}
+             % j < len(lproof) and lproof[j][0] == sibling
+          \ElsIf{$|\pi[\ell]| > n \land \pi[\ell][n].k = k_s$}
+            \State $v_s \gets \pi[\ell][n].k$
+            \State $n \gets n + 1$
+          \Else
+            \State $v_s \gets \varnothing$
           \EndIf
           \State $v_p \gets h(v_s, v)$ \textbf{if} is\_right \textbf{else} $h(v, v_s)$
           \State $p' \gets p' \| (k_p, v_p)$
-          \State $j \gets j + 1$
+          \State $m \gets m + 1$
         \EndWhile
         \State $p \gets p'$
       \EndFor

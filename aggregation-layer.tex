@@ -53,7 +53,7 @@
 }
 
 \title{Unicity Infrastructure:\\
-    the Proof Aggregation Layer}
+    the Aggregation Layer}
 
 \author[1]{Risto Laanoja}
 \affil[1]{Unicity Labs}
@@ -65,7 +65,7 @@
 \maketitle
 
 \begin{abstract}
-Unicity is a novel blockchain protocol with the ambitious goal of enabling token transactions to occur off-chain and, when necessary, offline. This premise requires supporting infrastructure to guarantee that there are no parallel states of assets, or more specifically, that there is no double-spending; a property we term the \textit{unicity}. It turns out that the lack of globally shared state and ordering reduces the blockchain overhead considerably. In designing this infrastructure, no compromises were made regarding its trust assumptions. This paper details the design of the Proof Aggregation Layer, the component responsible for producing Proofs of Inclusion and Non-inclusion to the users. We analyze its design for efficiency and evaluate the robustness of its trust and security model, and gains offered by cryptographic zero-knowledge tools.
+Unicity is a novel blockchain protocol with the ambitious goal of enabling token transactions to occur off-chain and, when necessary, offline. This premise requires supporting infrastructure to guarantee that there are no parallel states of assets, or more specifically, that there is no double-spending; a property we term the \textit{unicity}. It turns out that the lack of globally shared state and ordering reduces the blockchain overhead considerably. In designing this infrastructure, no compromises were made regarding its trust assumptions. This paper details the design of the Aggregation Layer, the component responsible for producing Proofs of Inclusion and Non-inclusion to the users. We analyze its design for efficiency and evaluate the robustness of its trust and security model, and gains offered by cryptographic zero-knowledge tools.
 \end{abstract}
 
 
@@ -98,7 +98,8 @@ None (``hash based'') & SHA-256 & 10\,000\textsuperscript{*} & 10\;MB & $O(n)$ &
 CIRCOM + Groth16         & Poseidon & 25 & 250\;b & $O(1)$ & Yes & Lower \\
 Gnark + Groth16          & Poseidon & 30 & 250\;b & $O(1)$ & Yes & Low \\
 SP1 zkVM  & SHA-256 & 1.5 & 2\;MB & $O(\log n)$ & No & Lowest \\
-Cairo~0 + STwo    & Poseidon2 & 60\textsuperscript{†} & 2.4\;MB & $O(\log n)$ & No & Medium \\
+Cairo~0 + STwo    & Poseidon & 60\textsuperscript{†} & 2.4\;MB & $O(\log n)$ & No & Medium \\
+Cairo + STwo      & Poseidon & 100 & 2.4\;MB & $O(\log n)$ & No & Medium \\
 AIR + Plonky3\textsuperscript{‡}   & Poseidon2 & 10\,000 & 1.7\;MB & $O(\log n)$ & No & High \\
 AIR + Plonky3   & Poseidon2 & 2500 & 0.7\;MB & $O(\log n)$ & No & High \\
 AIR + Plonky3   & Blake3 & 250 & 1.7\;MB & $O(\log n)$ & No & High \\
@@ -169,7 +170,7 @@ The introduction of economic security mechanisms is a logical step toward evolvi
 
 The switch to PoS includes the following steps: 1) introducing the staking mechanism to create economic security for the BFT layer, 2) alternative ledger for the native token securing and decentralizing the system, and executing the tokenomics plan there, 3) selecting BFT validators based on the stake, 4) adjusting incentives (block rewards, optional slashing), 5) migrating the token balances, and 5) sunsetting the PoW chain.
 
-\subsection{Proof Aggregation Layer}
+\subsection{Aggregation Layer}
 
 The Aggregation Layer implements a global, append-only key-value store that immutably records every spent token state. More specifically, it provides the following services: 1) recording of key-value tuples where the key identifies a token state and value is recording some meta-data, 2) returning inclusion proofs of keys, 3) returning non-inclusion proofs of keys not present in the store.
 

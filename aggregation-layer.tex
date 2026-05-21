@@ -65,7 +65,7 @@
 \maketitle
 
 \begin{abstract}
-Unicity is a novel blockchain protocol with the ambitious goal of enabling token transactions to occur off-chain and, when necessary, offline. This premise requires supporting infrastructure to guarantee that there are no parallel states of assets, or more specifically, that there is no double-spending; a property we term the \textit{unicity}. It turns out that the lack of globally shared state and ordering reduces the blockchain overhead considerably. In designing this infrastructure, no compromises were made regarding its trust assumptions. This paper details the design of the Aggregation Layer, the component responsible for producing Proofs of Inclusion and Non-inclusion to the users. We analyze its design for efficiency and evaluate the robustness of its trust and security model, and gains offered by cryptographic zero-knowledge tools.
+Unicity is a novel blockchain protocol with the ambitious goal of enabling token transactions to occur off-chain and, when necessary, offline. This premise requires supporting infrastructure to guarantee that there are no parallel states of assets, or more specifically, that there is no double-spending; a property we term the \textit{unicity}. It turns out that the lack of globally shared state and ordering reduces the blockchain overhead considerably. In designing this infrastructure, no compromises were made regarding its trust assumptions. This paper details the design of the Aggregation Layer, the component responsible for producing Proofs of Inclusion and Non-inclusion to the users. We analyze its design for efficiency and evaluate the robustness of its trust and security model. We then identify a single critical property that the Consensus Layer must verify on each round---\emph{prior-state preservation}---and observe that the remaining desirable properties of the trustless Key-Value store (canonical tree shape, batch incorporation, no phantom inserts, completeness) are not required by the Unicity Aggregator's security model. This optimal statement is implemented~\cite{rsmtair} as Algebraic Intermediate Representation (AIR) circuit on top of the Plonky3~\cite{plonky3} STARK toolkit. The implementation sustains a proving throughput in excess of $10\,000$ insertions per second on a single consumer-class CPU, with a succinct proof and tens of milliseconds verification time, and no trusted setup.
 \end{abstract}
 
 
@@ -75,13 +75,15 @@ The foundational principle of the Unicity Network~\cite{wp} is to minimize the v
 
 In a hierarchical trustless system, the principle is that the base layer (e.g., L1 blockchain) provides decentralization, while the layers below it (e.g., rollups) present cryptographic proofs of the correctness of their operation. In scaling Unicity, we have designed efficient data structures to prove the correctness of operation of Aggregation Layer to the Consensus Layer. Based on cryptographic hashes alone, the consistency proof grows linearly with respect to the number of user transactions. This imposes a hard limit of approx. $10\,000$ transactions per second (tx/s), beyond which the networking bandwidth of the Consensus Layer becomes the bottleneck.
 
-To scale further, we must use cryptographic zero-knowledge proofs (ZKPs) to compress the size of the consistency proofs. As an application of ZKPs, this use-case is fundamentally more efficient than using ZKPs to process the transaction data itself, as is done in many privacy coins and ZK-rollups.
+To scale further, we use cryptographic zero-knowledge proofs (ZKPs) to compress the size of the consistency proofs. As an application of ZKPs, this use-case is fundamentally more efficient than using ZKPs to process the transaction data itself, as is done in many privacy coins and ZK-rollups: the statement being proved is a single tree-update, with the batch as a private witness, not the whole execution trace of a virtual machine.
 
-In this paper, we show how to scale the Aggregation Layer to $10\,000$ tx/s \emph{per shard}. This figure represents the proving throughput achievable on a single consumer-class computer. Due to the small proof size and efficient verification, the Consensus Layer can support a practically unlimited number of such trustless shards. Table~\ref{tab:zk-comparison} compares different ZKP technologies. We have picked subjectively the most appropriate ZK schemes and supporting front-ends (``stacks'').
+A central observation of this paper is that the consensus-relevant statement is much narrower than ``the SMT was updated correctly''. The Consensus Layer only needs to be convinced that \emph{no previously-recorded leaf was deleted or modified}. All the remaining desirable properties of the Aggregation Layer---canonical tree shape, batch incorporation, no phantom inserts, completeness---turn out to be self-policed by the protocol layer that lives around the public root commitment: any deviation by a dishonest aggregator at insert time only damages its own ability to serve subsequent inclusion proofs against that root. Section~\ref{sec:scope} formalizes this scoping argument. The narrowness of the in-circuit statement is exactly what makes the AIR small and the proving cheap.
+
+In this paper, we show how to scale the Aggregation Layer to $10\,000$ tx/s \emph{per shard} and beyond. This figure was the original design target; the measured proving throughput of our reference implementation exceeds it by roughly $3\times$ on a single consumer-class CPU (Section~\ref{sec:custom-air-circuit}). Due to the small proof size and efficient verification, the Consensus Layer can support a practically unlimited number of such trustless shards. Table~\ref{tab:zk-comparison} compares different ZKP technologies. We have picked subjectively the most appropriate ZK schemes and supporting front-ends (``stacks''); the Plonky3 AIR rows now report measured numbers from our implementation~\cite{rsmtair}.
 
 \begin{table*}[h!]
 \centering
-\caption{Comparison of zero-knowledge proof technologies for compression of non-deletion proofs.}
+\caption{Comparison of zero-knowledge proof technologies for compression of non-deletion proofs. The Plonky3 AIR rows are measured on the reference implementation~\cite{rsmtair} (10-core Apple M1 ``Pro'', batch size 4096, $\sim$116 conjectured soundness bits); the remaining rows are taken from earlier experiments referenced in the text.}
 \label{tab:zk-comparison}
 \begin{tabular}{@{}lccccccc@{}}
 \toprule
@@ -91,30 +93,27 @@ In this paper, we show how to scale the Aggregation Layer to $10\,000$ tx/s \emp
 \makecell{\textbf{Proof}\\\textbf{Size}} &
 \makecell{\textbf{Proof Size}\\\textbf{Asymptotics}} &
 \makecell{\textbf{Trusted}\\\textbf{Setup}} &
-%\makecell{\textbf{PQ}\\\textbf{Secure}} &
 \makecell{\textbf{Impl.}\\\textbf{Effort}} \\
 \midrule
 None (``hash based'') & SHA-256 & 10\,000\textsuperscript{*} & 10\;MB & $O(n)$ & No & N/A \\
-CIRCOM + Groth16         & Poseidon & 25 & 250\;b & $O(1)$ & Yes & Lower \\
-Gnark + Groth16          & Poseidon & 30 & 250\;b & $O(1)$ & Yes & Low \\
-SP1 zkVM  & SHA-256 & 1.5 & 2\;MB & $O(\log n)$ & No & Lowest \\
-Cairo~0 + STwo    & Poseidon & 60\textsuperscript{†} & 2.4\;MB & $O(\log n)$ & No & Medium \\
-Cairo + STwo      & Poseidon & 100 & 2.4\;MB & $O(\log n)$ & No & Medium \\
-AIR + Plonky3\textsuperscript{‡}   & Poseidon2 & 10\,000 & 1.7\;MB & $O(\log n)$ & No & High \\
-AIR + Plonky3   & Poseidon2 & 2500 & 0.7\;MB & $O(\log n)$ & No & High \\
-AIR + Plonky3   & Blake3 & 250 & 1.7\;MB & $O(\log n)$ & No & High \\
+CIRCOM + Groth16      & Poseidon & 25 & 250\;B & $O(1)$ & Yes & Lower \\
+Gnark + Groth16       & Poseidon & 30 & 250\;B & $O(1)$ & Yes & Low \\
+SP1 zkVM              & SHA-256  & 1.5 & 2\;MB & $O(\log n)$ & No & Lowest \\
+Cairo + STwo          & Poseidon & 100 & 2.4\;MB & $O(\log n)$ & No & Medium \\
+\textbf{AIR + Plonky3}\textsuperscript{‡} & Poseidon2 & \textbf{28\,000} & 1.76\;MB & $O(\log n)$ & No & High \\
+AIR + Plonky3 (small proof)   & Poseidon2 & 21\,000 & 0.93\;MB & $O(\log n)$ & No & High \\
+AIR + Plonky3 (Blake3 FRI)    & Poseidon2 & 31\,000 & 1.69\;MB & $O(\log n)$ & No & High \\
 \bottomrule
 \end{tabular}
 
 \vspace{0.5em}
 \raggedright
-\textsuperscript{*} Bandwidth-limited, no verification effort reduction.\\
-\textsuperscript{†} Trace generation before proving is impractically slow.\\
-\textsuperscript{‡} See Section~\ref{sec:custom-air-circuit} for details.
+\textsuperscript{*} Bandwidth-limited at the Consensus Layer; no verification-effort reduction.\\
+\textsuperscript{‡} Measured; see Section~\ref{sec:custom-air-circuit} for details and \cite{rsmtair} for the reference implementation. The internal tree hash is always Poseidon2; ``Blake3 FRI'' refers to the choice of hash inside FRI, Merkle commitments and the Fiat--Shamir transcript.
 \end{table*}
 
 
-The estimated implementation effort reflects the perceived maturity and learning curve; and the difficulty of producing safe implementations.
+The estimated implementation effort reflects the perceived maturity and learning curve, and the difficulty of producing safe implementations. Custom AIR designs sit at the high end of effort because the circuit is hand-built rather than synthesized from a general-purpose program; this is the cost we pay for the order-of-magnitude proving-throughput advantage over zkVM-based stacks.
 
 % zk use vs zk in L2
 
@@ -129,7 +128,7 @@ To prevent double-spending of tokens, the Unicity Infrastructure permanently\foo
 
 The rest of the processing---executing transactions, running smart contracts, etc.---can happen at the client layer, executed by users or ``agents''. Agents are themselves the interested parties in data availability and transaction validation, and they choose the ordering of incoming messages for processing. Thus, the Unicity Infrastructure is relieved of these duties, removing a major scaling bottleneck of traditional L1 blockchains.
 
-The Unicity Infrastructure operates in a trust-minimized way by utilizing distributed authenticated data structures and cryptographic zero-knowledge tools (SNARKs) for extra succinctness of messages and tokens. The Proof of Unicity is a fresh \emph{proof of inclusion} of the token state being spent. This can be efficiently generated based on a Merkle Tree data structure. The proof size is logarithmic with respect to the tree's capacity, making it highly efficient. If the root of the tree is securely fixed, the integrity of the rest of the tree can be verified trustlessly: it is computationally infeasible to generate a valid inclusion proof for an element not present in the tree, without changing the root, or breaking underlying cryptographic assumptions. The infrastructure also supports \textit{non-inclusion proofs}, making it possible to prove to other parties that a particular token state has not yet been spent. The Unicity Infrastructure can thus be conceptualized as a large-scale, distributed Sparse Merkle Tree (SMT). Specifically, the tree is implemented as an indexed variant with some optimizations. In this paper, without the loss of generality, we model the distributed tree as an SMT. Furthermore, an SMT is straightforward to shard: the tree is partitionable vertically into slices. Leaves remain at their deterministically computed positions, as an SMT is an indexed data structure. Each leaf's identifier encodes its address in the tree, and the leaf's shard address is a prefix of the identifier.
+The Unicity Infrastructure operates in a trust-minimized way by utilizing distributed authenticated data structures and cryptographic zero-knowledge tools (SNARKs) for extra succinctness of messages and tokens. The Proof of Unicity is a fresh \emph{proof of inclusion} of the token state being spent. This can be efficiently generated based on a Merkle Tree data structure. The proof size is logarithmic with respect to the tree's capacity, making it highly efficient. If the root of the tree is securely fixed, the integrity of the rest of the tree can be verified trustlessly: it is computationally infeasible to generate a valid inclusion proof for an element not present in the tree, without changing the root, or breaking underlying cryptographic assumptions. The infrastructure also supports \textit{non-inclusion proofs}, making it possible to prove to other parties that a particular token state has not yet been spent. The Unicity Infrastructure can thus be conceptualized as a large-scale, distributed Sparse Merkle Tree (SMT). Specifically, the production tree is implemented as a path-compressed radix variant (the RSMT3 design, see Section~\ref{sec:custom-air-circuit}) that eliminates single-child internal chains while preserving the standard property that the key uniquely determines the leaf position. In this paper, without the loss of generality, we model the distributed tree as a plain SMT. Furthermore, an SMT is straightforward to shard: the tree is partitionable vertically into slices. Leaves remain at their deterministically computed positions, as an SMT is an indexed data structure. Each leaf's identifier encodes its address in the tree, and the leaf's shard address is a prefix of the identifier.
 
 Aggregation Layer connects to the Consensus Layer. For fully trustless operation, each request is accompanied by a cryptographic proof of SMT consistency.
 
@@ -288,6 +287,36 @@ If we relax the model by assuming that a majority of BFT consensus nodes exhibit
 In this scenario, a transaction is finalized, and an inclusion proof is returned within a few seconds, allowing the transaction to be independently verified—without consulting external data\footnote{Previously obtained Root of Trust is used to validate future transactions}—within the same timeframe.
 
 The Root of Trust is the set of epoch change records of the BFT consensus layer. These records grow slowly (few aggregated signatures per week). When transitioning to proof-of-stake (PoS) consensus (see Section~\ref{sec:consensus-roadmap}), the Root of Trust remains the same.
+
+
+\subsection{Scope of the In-Circuit Statement}
+\label{sec:scope}
+
+A core engineering choice in the design of the Aggregation Layer's consistency proof is to push as much of the per-round security argument out of the cryptographic proof as possible, leaving only an irreducibly small kernel inside the circuit. We make this scoping explicit.
+
+Let $M_{i-1}, M_i \colon \{0,1\}^* \to \{0,1\}^* \cup \{\bot\}$ be the partial maps of recorded key-value bindings committed by, respectively, the previous and the new state roots $r_{i-1}, r_i$. We say the round update $r_{i-1} \to r_i$ satisfies \emph{prior-state preservation} iff
+\begin{equation}
+  \forall k \in \mathrm{dom}(M_{i-1})\colon\quad M_i(k) = M_{i-1}(k).
+  \label{eq:psp}
+\end{equation}
+That is, every key already recorded under $r_{i-1}$ is bound to the same value under $r_i$. Equivalently, the round adds a (possibly empty) set of fresh keys and modifies nothing.
+
+\begin{definition}[Minimal in-circuit statement]
+\label{def:minimal}
+For an SMT-instantiated Aggregation Layer, the cryptographic per-round consistency proof needs to enforce only \eqref{eq:psp}, given authentic roots $(r_{i-1}, r_i)$.
+\end{definition}
+
+The other desirable properties of the Aggregation Layer can be enumerated and accounted for as follows:
+
+\begin{description}[nosep]
+    \item[Completeness] (\emph{every well-formed user request appears in the next round}). A censoring aggregator does not violate prior-state preservation; it merely fails to serve some users. The protocol mitigates this by replication (highly-available cluster) and by allowing users to resubmit through alternative aggregators in the same shard.
+    \item[Batch incorporation proof] (\emph{the round proof testifies to inclusion of every batch element}). Rather than have the consistency proof carry per-element inclusion claims, we let the Aggregation Layer serve fresh inclusion proofs on demand against the certified root. An aggregator that does not actually insert the batch will simply fail to produce valid inclusion proofs later, which is detectable by recipients.
+    \item[No phantom inserts] (\emph{nothing is recorded that was not a user request}). At worst, an aggregator does free recording work for itself or third parties; it cannot affect any honest user's tokens, because their state IDs are unrelated to the phantom entries.
+    \item[Canonical tree shape] (\emph{the post-state tree is the unique one prescribed by the SMT rules}). A non-canonical insertion produces a root that the aggregator cannot subsequently extend by canonical inclusion proofs for those keys; downstream verifiers reject. The aggregator only denies service to itself.
+    \item[Non-deletion / prior-state preservation] (\emph{equation \eqref{eq:psp}}). \emph{Critical.} If this fails, the operator can rewrite history and double-spending becomes possible. This is the property that must be cryptographically enforced \emph{before} round certification.
+\end{description}
+
+Restricting the in-circuit statement to \eqref{eq:psp} has several useful consequences. First, the witness need not contain the actual batch contents---the prover may keep them entirely private and bind them to the proof through the soundness chain of the circuit (Section~\ref{sec:custom-air-circuit}). This shrinks the public statement to the two root digests. Second, the circuit does not have to encode the canonical-shape rules of the underlying SMT variant, which is by far the most constraint-heavy aspect of any naive arithmetization (cf.~\cite{rsmtair}, ``cost-of-canonical detour''). Third, the proof scales with the batch size alone, not with the total tree capacity.
 
 
 \section{Non-deletion Proof}
@@ -487,26 +516,150 @@ A key advantage of these hashes is that they operate directly on field elements,
 
 \subsection{Performance Roadmap}
 
-The overall approach is sound: the proving time depends on the size of the addition batch, and notably, it does not have linear relationship to the total capacity of the data structure. The verification algorithm is tight.
+The overall approach of the zkVM path is sound: the proving time depends on the size of the addition batch, and notably, it does not have linear relationship to the total capacity of the data structure. The verification algorithm is tight. The performance bottleneck is, as discussed, the cost of arithmetizing a general-purpose execution trace that includes integer-to-field translations for every bitwise operation in the hash function.
 
-To overcome the performance bottleneck, a ZK-friendly hash function is essential. The ideal proving framework would provide direct access to the native field elements of its arithmetization layer, a feature not typically available in general-purpose zkVMs. Execution trace generation must be highly efficient (a criterion that excludes older frameworks like Cairo~0). The prover itself must be fast. State-of-the-art uses small prime fields (e.g., BabyBear, Mersenne-31) and FRI-based polynomial commitment schemes, like Circle-STARKs~\cite{cryptoeprint:2024/278}. Promising implementations are Plonky3\footnote{\url{https://github.com/Plonky3/Plonky3}} and STwo\footnote{\url{https://github.com/starkware-libs/stwo}}. Considering the need for maturity, modularity, and an open-source license, Plonky3 emerges as the strongest option.
+To overcome this bottleneck, a ZK-friendly hash function and direct access to native field elements are essential---a combination not typically available in general-purpose zkVMs. The remaining ingredients are an efficient execution-trace generator (a criterion that excludes older frameworks like Cairo~0), a fast prover over a small prime field (e.g., BabyBear, Mersenne-31), and a transparent FRI-based polynomial commitment scheme, possibly with Circle-STARK~\cite{cryptoeprint:2024/278} optimizations. Two implementations meeting these criteria are Plonky3~\cite{plonky3} and STwo\footnote{\url{https://github.com/starkware-libs/stwo}}. Considering the need for maturity, modularity, the support for batch-STARK composition, and an open-source license, Plonky3 emerged as the strongest option.
 
-To utilize the Plonky3 framework, the verification logic must be implemented as a custom AIR circuit (Algebraic Intermediate Representation) rather than a general-purpose program.
+To utilize the Plonky3 framework, the verification logic must be implemented as a custom AIR circuit (Algebraic Intermediate Representation) rather than as a general-purpose program. The remainder of this paper reports the resulting design and its measured performance.
 
-\subsection{Custom AIR Circuit}
+\section{Custom AIR Circuit}
 \label{sec:custom-air-circuit}
 
-Extrapolating from benchmarks of similar computations~\footnote{Experiment with iterative hashing and a hash-based signature scheme \url{https://github.com/han0110/hash-sig-agg/}} using the Plonky3 framework, Poseidon2 hash function, and a small finite field, the projected performance of such a stack on a 10-core CPU is approximately 10\,000\;tx/s. The parameter ``blowup factor'' is $2^1$, resulting in a 1.7\;MB proof. A more conservative configuration with a blowup factor of $2^3$ would yield approximately 2500\;tx/s with a 0.7\;MB proof and higher memory requirements for the prover.
+We implemented the consistency-proof verification logic as a Plonky3 AIR over the BabyBear~\cite{babybear} 31-bit prime field, using Poseidon2~\cite{cryptoeprint:2023/323} (width 16, $\alpha=7$) as the in-circuit hash function. The reference implementation is open-source~\cite{rsmtair} and is the source of all measured numbers reported below.
 
-These figures indicate that operating very large-scale Aggregation Layer in a trustless manner is economically feasible.
+\subsection{Underlying Tree Variant}
 
-We note that the Poseidon family of hash functions is relatively new and has undergone less cryptographic analysis than traditional hash functions like the SHA-2 or SHA-3 families. However, among the new class of ZK-friendly arithmetic hash functions, Poseidon has undergone the most public scrutiny and can be tentatively considered secure for this type of application. It offers an estimated 50$\times$ improvement in proving performance compared to efficient standard hash function like Blake3.
+The implementation proves consistency for a path-compressed Patricia trie over 256-bit keys, which we call RSMT3 (radix sparse Merkle tree, third iteration). RSMT3 has three node kinds: leaves (which hash key and value together via an additive Poseidon2 sponge), internal junctions (each is the unique point where two non-empty subtrees diverge; the junction hash includes the bifurcation depth so that subtrees cannot be silently re-attached at a different level), and empty subtrees (denoted by a canonical zero digest). Path compression eliminates single-child chains, drastically reducing the number of hash evaluations relative to a depth-256 indexed SMT, while preserving the standard SMT property that the key uniquely determines the leaf position. As established in Section~\ref{sec:scope}, the in-circuit statement does not need to enforce the canonical-shape rules of RSMT3---it only needs to enforce prior-state preservation.
+
+\subsection{From Stack Verifier to AIR}
+
+The consistency proof is expressed as a flat post-order opcode stream over a tiny instruction set:
+\begin{itemize}[nosep]
+    \item $S(h)$: an unchanged subtree with digest $h$ (push $(h, h)$ onto the verifier stack).
+    \item $L$: a fresh leaf, popped from the sorted batch (push $(\varnothing, \mathsf{leafhash}(k, v))$).
+    \item $N(d)$: a junction at depth $d$, pops two children (push the parent's $(\mathsf{old}, \mathsf{new})$ tuple, with the new digest always recomputed from both new children and the old digest determined by a four-way rule on whether each child existed in the pre-state).
+\end{itemize}
+A reference verifier is a $\sim$60-line stack machine; the AIR is its arithmetization. Verification accepts iff the final stack is exactly $(r_{i-1}, r_i)$.
+
+The four-way old-state rule on $N(d)$ is the only branching primitive: depending on which of the two children was empty in the pre-state, the parent's old digest is either $\varnothing$, the left child's old digest (right-empty passthrough), the right child's old digest (left-empty passthrough), or a fresh node-hash of both old children. Pass-throughs are what make add-only proofs short: there is no hashing on the part of the tree that did not change.
+
+\subsection{Six-Table AIR Design}
+
+The arithmetization is split across six AIRs that share a single \texttt{prove\_batch} polynomial-commitment commitment, and are tied together by six global LogUp~\cite{cryptoeprint:2022/1530} buses. Each table is padded independently to a power-of-two row count.
+
+\begin{description}[nosep]
+    \item[Table A (opcodes)] one row per $S/L/N$ opcode in the proof stream. Carries the opcode selector, the row's $(\mathsf{old}, \mathsf{new})$ digests and $\mathsf{old\_is\_none}$ bit, plus $N$-row metadata (depth, left-child pointer, ``old hash needed'' bit). Boundary constraints on the last real row pin $(\mathsf{old}, \mathsf{new})$ to the public roots $(r_{i-1}, r_i)$.
+    \item[Table F (N-join)] one row per $N$ opcode, holding the left and right child digests, the parent digests, and three explicit case-selector bits $b_{01}, b_{10}, b_{11}$ for the four-way rule. Locality constraint $\mathsf{right\_ptr} = \mathsf{parent\_row\_idx} - 1$ together with the children bus implements the post-order shape locally.
+    \item[Table B (Poseidon2)] every Poseidon2 permutation evaluated anywhere in the proof. Built directly on \texttt{p3-poseidon2-air::VectorizedPoseidon2Air} (lanes per row = 8). Per-lane sends on the $p2$ bus carry the full $(\mathsf{in}[16] \| \mathsf{out}[16])$ tuple.
+    \item[Table C (leaf sponge)] three rows per leaf---one per absorption step---driving the additive sponge state transitions and absorbing $(k, v)$ into the Poseidon2 state.
+    \item[Table D (sorted batch, private)] preprocessed-only table with the sorted batch packed as $9 \times 30$-bit BabyBear limbs per key and per value. The verifier never receives the batch; it sees only the prover's preprocessed commitment, transcript-bound to the public roots through the LogUp bus chain.
+    \item[Table E ($u8$ range)] fixed-256-row table that range-checks every $N$ row's depth into $[0, 256)$.
+\end{description}
+
+The six LogUp buses tie the tables together. The most important ones:
+\begin{enumerate}[nosep]
+    \item \emph{Tree bus}: every non-last real Table A row sends its row index and digests; Table F receives them as the left and right children of its junction rows. Combined with Table F's locality, this gives the post-order tree shape.
+    \item \emph{Poseidon2 bus}: every requested junction hash and every leaf-sponge step receives one Poseidon2 permutation from Table B, ensuring that no in-circuit ``hash'' is anything other than a real Poseidon2 evaluation.
+    \item \emph{Parent bus}: each Table F row sends its parent tuple back to the matching Table A $N$ row.
+    \item \emph{Leaf and batch buses}: Table C step 2 sends $(\mathsf{batch\_idx}, \mathsf{digest})$ to Table A's $L$ rows, and receives $(\mathsf{idx}, \mathsf{key}, \mathsf{value})$ from Table D. The chain $D \to C \to A \to \text{boundary}$ is what binds the private batch to the public new root.
+    \item \emph{Range bus}: enforces $\mathsf{depth} \in [0, 256)$.
+\end{enumerate}
+
+The end result is that a verifying proof, by the LogUp-soundness composition of the per-AIR local constraints, implies the existence of a private batch $B$ and a consistency-proof opcode stream $\pi$ that, when executed by the reference stack verifier, take $r_{i-1}$ to $r_i$ without deleting or modifying any pre-existing leaf---exactly the property of Definition~\ref{def:minimal}.
+
+The reference implementation includes a battery of adversarial \emph{tamper tests}~\cite{rsmtair} that perturb a verifying trace (swap children, duplicate a row, forge $\mathsf{old\_is\_none}$, break the four-way passthrough, reuse a Poseidon2 result across leaves, tamper a hash output tail, etc.) and assert that proving or verification fails. These collectively exercise every bus and every local-constraint family of the AIR.
+
+\subsection{Cryptographic Setup}
+
+The proof system uses the BabyBear prime field $p = 2^{31} - 2^{27} + 1$, with the degree-4 binomial extension field $\mathbb{F}_{p^4}$ ($|\mathbb{F}_{p^4}| \approx 2^{124}$) for LogUp challenges and FRI low-degree testing. The PCS is \texttt{TwoAdicFriPcs} backed by Merkle trees. Conjectured FRI soundness at the default configuration (\texttt{log\_blowup}\,$=1$, \texttt{num\_queries}\,$=100$, \texttt{query\_pow\_bits}\,$=16$) is $\sim$116 bits. No trusted setup is required; Fiat--Shamir is applied via a duplex Poseidon2 challenger.
+
+LogUp cross-table soundness reduces to a multiset-equality test over $\mathbb{F}_{p^4}$ with error $\leq \sum_\text{AIR} \text{padded\_height} / |\mathbb{F}_{p^4}|$, comfortably below $2^{-100}$ for every bus in the parameter range used here.
+
+\subsection{Measured Performance}
+\label{sec:measured}
+
+Hardware: 10-core Apple M1 ``Pro''; release build with utilizing 8 CPU cores; one consistency proof per row.
+
+\begin{table}[ht]
+\centering
+\caption{Default configuration ($\sim$116-bit conjectured soundness, Poseidon2 as FRI hash, fresh-batch workload).}
+\label{tab:perf-default}
+\small
+\begin{tabular}{r|rrrr|r}
+\toprule
+\textbf{batch} & \textbf{wit} & \textbf{trace} & \textbf{prove} & \textbf{verify} & \textbf{proof} \\
+\midrule
+1024 & 11\,ms & 5\,ms & 149\,ms & 44\,ms & 1.69\,MB \\
+4096 & 20\,ms & 4\,ms & 143\,ms & 45\,ms & 1.76\,MB \\
+8192 & 37\,ms & 5\,ms & 228\,ms & 47\,ms & 1.82\,MB \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[ht]
+\centering
+\caption{Effect of FRI parameters (batch 4096).}
+\label{tab:perf-knobs}
+\small
+\begin{tabular}{l|rrr}
+\toprule
+\textbf{configuration} & \textbf{prove} & \textbf{verify} & \textbf{proof} \\
+\midrule
+default & 143\,ms & 45\,ms & 1.76\,MB \\
+small proof (blowup\,$=2$, q\,$=50$) & 198\,ms & 24\,ms & 0.93\,MB \\
+high PoW (PoW\,$=24$, q\,$=92$) & 985\,ms & 42\,ms & 1.62\,MB \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[ht]
+\centering
+\caption{Choice of FRI / commitment hash (batch 4096, internal tree hash is always Poseidon2).}
+\label{tab:perf-frihash}
+\small
+\begin{tabular}{l|rrr}
+\toprule
+\textbf{FRI hash} & \textbf{prove} & \textbf{verify} & \textbf{proof} \\
+\midrule
+Poseidon2 & 138\,ms & 41\,ms & 1.76\,MB \\
+SHA-256   & 149\,ms & 18\,ms & 1.69\,MB \\
+Blake3    & 130\,ms & 12\,ms & 1.69\,MB \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+A few observations on the measured data:
+
+\begin{itemize}[nosep]
+    \item Sustained proving throughput on a single CPU is $\sim$28\,000 tx/s at the default config and $\sim$36\,000 tx/s at a batch of 8192. This comfortably exceeds the original design target of $10\,000$ tx/s per shard.
+    \item Increasing the FRI blowup from $2^1$ to $2^2$ halves the proof size and the verifier work, at the cost of $\sim$1.4$\times$ prover time. This is the natural ``small proof'' operating point.
+    \item Increasing the proof-of-work grinding bits from $16$ to $24$ slows the prover by $\sim$5--7$\times$ for an $\sim$8\% proof-size reduction; not a useful trade in this parameter range.
+    \item The choice of FRI / Merkle hash is largely independent of in-circuit performance. For a \emph{native} verifier (e.g., the Consensus Layer's BFT core), Blake3 gives a $3\times$ faster verification at the same prove time. For \emph{recursive} verification inside another circuit, Poseidon2 is the natural choice because it is field-friendly.
+    \item Table B (Poseidon2 evaluations) dominates the cell count, accounting for $\sim$76\% of the trace across all batch sizes. Further proving-side gains will come primarily from improvements to the Poseidon2 AIR.
+    \item Verification time is essentially flat ($\sim$40\,ms with Poseidon2 FRI, $\sim$12\,ms with Blake3) across the measured batch range, dominated by FRI Merkle openings rather than by anything that scales with batch size.
+\end{itemize}
+
+Determinism is preserved across serial and parallel builds: \texttt{prove\_batch} output is byte-identical between the two, for the same challenger seed.
+
+\subsection{Comparison with Alternative ZK Stacks}
+
+The measured Poseidon2/Plonky3 AIR throughput is roughly $250\times$ faster than the SP1 zkVM implementation of the same verification logic, and $1000\times$ faster than the CIRCOM/Groth16 design (Table~\ref{tab:zk-comparison}). The proof is larger than Groth16's 250-byte constant ($\sim$1.7\,MB vs.\ 250\,B), but well below the Consensus Layer's bandwidth budget of $\sim$10\,MB per shard per round; and the verification time, measured at $\sim$45\,ms (Poseidon2 FRI) or $\sim$12\,ms (Blake3 FRI), is acceptable in the BFT block-validation critical path.
+
+The much-larger constant in Groth16's proof size is essentially the only metric on which the Plonky3 AIR is worse than the circuit-based approach. In return we get a transparent setup (no per-circuit trusted ceremony), post-quantum-friendly assumptions (hash-only, no curve pairings), and an order-of-magnitude better prover throughput---which is the bottleneck of practical interest.
+
+\subsection{Deployment}
+
+Operationally, the AIR is a drop-in replacement for the prior hash-based or SP1-based consistency-proof producer in the Unicity aggregator implementation. The proof's public statement is unchanged ($r_{i-1}, r_i$); only the proof bytes shipped from the Aggregation Layer to the Consensus Layer change. Speculative execution of the next round overlaps with the unicity-certificate wait of the current round, so the AIR's prover latency does not lengthen the user-visible round time.
+
+The entire proving stack runs on a single CPU. Unlike L1 ZK-rollup proving pipelines, there is no GPU farm, no proving market, no proving service. A single Aggregator that sustains $10\,000$ insertions per second fits within the power budget of a laptop charger.
 
 \section{Summary}
 
 Zero-knowledge proof systems offer a powerful method for creating succinct proofs of performing some computation, in our case, checking consistency proofs of a distributed cryptographic data structure. For use cases with small changesets, a simple hash-based proof, whose size is linear in the batch size, is optimal. However, as batch sizes increase and bandwidth becomes a constraint, the constant or near-constant size proofs generated by ZK systems become more advantageous.
 
-Different proof systems offer different trade-offs. The properties are: proving effort, necessity of trusted setup, generality of trusted setup, interactivity, proof recursion-friendliness, and of course properties like availability of tooling, maturity, trustworthiness. Some, like STARKs, are relatively fast to prove but have fairly large proofs; and avoid undesirable properties such as trusted setup. Others, like Groth16, produce small proofs but require more proving effort and a circuit-specific trusted setup. For more complex applications, hybrid approaches and proof recursion can be employed. Figure~\ref{fig:comp} illustrates the proof size trade-off.
+Different proof systems offer different trade-offs. The relevant properties are proving effort, necessity (and generality) of trusted setup, interactivity, recursion-friendliness, and the maturity and trustworthiness of available tooling. STARKs are comparatively fast to prove but have larger proofs, and avoid undesirable properties such as trusted setup. Groth16 SNARKs produce small proofs but require more proving effort and a circuit-specific trusted setup. For more complex applications, hybrid approaches and proof recursion can be employed. Figure~\ref{fig:comp} illustrates the proof size trade-off.
+
+A second axis of optimization, equally important, is the design of the in-circuit statement itself. The minimalist scoping argument of Section~\ref{sec:scope}---only \emph{prior-state preservation} needs cryptographic enforcement, with the remaining SMT properties self-policed by the protocol around the public root---turns a verification problem that naively would require encoding the full canonical tree-construction rules into one with a tight, hand-built AIR. The result is the measured order-of-magnitude proving-throughput advantage of the Plonky3 AIR over zkVM-based approaches reported in Section~\ref{sec:measured}: a single Aggregator on a single CPU sustainably exceeds $10\,000$ insertions per second with a 1.7\,MB transparent proof and tens of milliseconds verification time. This shows that operating a very large-scale Aggregation Layer in a trustless manner is economically feasible today, with no GPU farm or trusted setup, and on a power budget compatible with commodity hardware.
 
 \begin{figure}[!htbp]
     \centering

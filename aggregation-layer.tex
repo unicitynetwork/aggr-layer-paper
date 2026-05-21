@@ -83,7 +83,7 @@ In this paper, we show how to scale the Aggregation Layer to $10\,000$ tx/s \emp
 
 \begin{table*}[h!]
 \centering
-\caption{Comparison of zero-knowledge proof technologies for compression of non-deletion proofs. The Plonky3 AIR rows are measured on the reference implementation~\cite{rsmtair} (10-core Apple M1 ``Pro'', batch size 4096, $\sim$116 conjectured soundness bits); the remaining rows are taken from earlier experiments referenced in the text.}
+\caption{Comparison of zero-knowledge proof technologies for compression of non-deletion proofs.}
 \label{tab:zk-comparison}
 \begin{tabular}{@{}lccccccc@{}}
 \toprule
@@ -115,11 +115,49 @@ AIR + Plonky3 (Blake3 FRI)    & Poseidon2 & 31\,000 & 1.69\;MB & $O(\log n)$ & N
 
 The estimated implementation effort reflects the perceived maturity and learning curve, and the difficulty of producing safe implementations. Custom AIR designs sit at the high end of effort because the circuit is hand-built rather than synthesized from a general-purpose program; this is the cost we pay for the order-of-magnitude proving-throughput advantage over zkVM-based stacks.
 
-% zk use vs zk in L2
 
-% zk use vs zk in privacy coins (nullifiers)
+\section{State of the Art and Comparison}
+\label{sec:sota}
 
-% numbers to last page graph
+The Aggregation Layer occupies a fairly narrow point in the design space of authenticated and zero-knowledge data structures. We briefly position it against the most directly comparable lines of work and contrast its proving objectives with those of related systems.
+
+\subsection{Authenticated Append-Only Dictionaries}
+
+Sparse Merkle Trees originate as an extension of binary Merkle hash trees to large key spaces: every potential key is assigned a deterministic position, and the proof that a key is absent is just the root computation taken over canonical-empty subtrees. The systematic study of their cost and engineering trade-offs is more recent. Dahlberg, Pulls, and Peeters~\cite{dahlberg2016smt} present efficient SMT constructions and caching strategies for membership and non-membership proofs with realistic key-space sizes; their analysis is part of the foundation that makes deep-keyed SMTs practical. The path-compressed (radix) variant we use in the Aggregation Layer (Section~\ref{sec:custom-air-circuit}) is a constant-factor refinement of the same line of work.
+
+A related and operationally closer system is Certificate Transparency (CT)~\cite{rfc6962}, which maintains append-only Merkle logs of TLS certificates and provides both inclusion and \emph{consistency} proofs between successive signed tree heads. The cryptographic role of the CT consistency proof is conceptually the same as our non-deletion proof: it convinces an auditor that a new log state extends the previous one without rewriting it. The differences are operational: CT logs are chronologically append-only with no key-determined position, log entries are not deduplicated against double-spending semantics, and there is no per-round ZK compression of the consistency witness. Our use of SMTs adds a key-determined position (so that double-spending becomes a key collision) and our use of ZK compresses the per-round witness to a constant size.
+
+\subsection{Comparison with ZK-Rollups on Ethereum L1}
+
+Ethereum's ZK-rollup ecosystem (Polygon zkEVM~\cite{polygonzkevm}, zkSync, Scroll, StarkNet, and similar systems) uses zero-knowledge proofs to compress the execution trace of an entire L2 virtual machine into a succinct proof that the L1 chain can verify. The statement being proved is, schematically, ``starting from L2 state root $r_{i-1}$ and a block of L2 transactions $B_i$, the L2 EVM produced state root $r_i$''. This requires the circuit to arithmetize the EVM instruction set, account-storage Merkle Patricia tries, signature verification, gas accounting, and so on. The resulting proving cost is large enough that production rollups run dedicated GPU farms or outsource to specialized proving markets.
+
+The Unicity Aggregation Layer proves a much smaller statement: not ``the VM executed correctly'' but only ``the SMT changed in an allowed way''. There is no in-circuit execution, no signature verification, no contract interpretation. Validation of transactions is done off-chain by the parties who have an economic interest in the outcome, namely the recipients in the Execution Layer~\cite{exemodel}. The ZK proof ensures that the global no-double-spend invariant is preserved. As a result the same cryptographic toolkit (small-field STARKs, FRI, Poseidon-family hashes) delivers $\sim$10$^4$ tx/s per shard on a single CPU rather than $\sim$10$^2$ tx/s on a GPU rack.
+
+\subsection{Comparison with Privacy-Oriented ZK Chains}
+
+Privacy-oriented chains such as Zcash~\cite{zerocash} use ZK-SNARKs to hide transaction contents---sender, receiver, and amount---behind a commitment scheme. A spent note is identified by a public \emph{nullifier} derived from a secret, and the chain maintains a global nullifier set to prevent double-spending. The ZK proof at spend time asserts that the spender knows a commitment in the note tree and the corresponding nullifier without revealing which one. Each user-level transaction therefore carries its own succinct ZK proof.
+
+The Unicity protocol does not use ZK for transaction privacy. Privacy of payloads and recipient information is achieved structurally, by keeping transaction execution off-chain and exposing only an unlinkable per-spend identifier to the global system; the user wallet and service-side privacy aspects of this model are detailed in the companion paper~\cite{exemodel}. ZK is used only for the much narrower purpose of compressing the Aggregation Layer's per-round consistency proof on its way to the Consensus Layer. Consequently, the prover does not need to run a circuit per user transaction; one batch proof per round amortizes over thousands of transactions, and there is no anonymity-set scaling cost.
+
+\subsection{Comparison with Nullifier-Tree Mixers}
+
+Nullifier-tree mixers such as Tornado Cash~\cite{tornado} occupy a third design point. They maintain two related authenticated structures: a commitment tree of deposits (a Merkle tree of fixed-denomination notes) and a nullifier set of spent notes. Each withdrawal is accompanied by a ZK proof that the withdrawer knows a deposit commitment in the tree and the associated nullifier, with the nullifier being inserted into the nullifier set to block double-withdrawals. The anonymity set is the population of unspent notes; the privacy guarantee is fundamentally tied to that set's size.
+
+The Unicity Aggregation Layer's SMT is, on the surface, also a structure for preventing double-use of a one-time identifier. The differences are substantive. First, Unicity has no anonymity-set construction: spent state IDs are recorded in clear in the SMT, and unlinkability is provided by the off-chain execution model rather than by hiding the spend inside a crowd~\cite{exemodel}. Second, the ZK proof boundary is different: in a nullifier-tree mixer the ZK proof is produced \emph{by the user} for each withdrawal and the chain only verifies it, whereas in Unicity the ZK proof is produced \emph{by the aggregator} once per batched round and is invisible to end users. Third, the underlying tree semantics differ: Tornado's commitment tree is an append-only log used for set-membership proofs, while Unicity's SMT is a keyed dictionary used both for inclusion (Proof of Unicity for the current spend) and non-inclusion (proof that a given state has not yet been spent) proofs.
+
+\subsection{Why ZK Proving in Unicity Is Comparatively Efficient}
+
+The combined effect of the design choices above is a proving workload that is one to three orders of magnitude smaller than in comparable ZK systems. The principal reasons:
+
+\begin{enumerate}[nosep]
+    \item \emph{Narrow in-circuit statement.} Only prior-state preservation needs to be enforced; canonical shape, batch incorporation, and freshness are self-policed by the protocol layer (Section~\ref{sec:scope}).
+    \item \emph{No in-circuit transaction execution.} Validation of signatures, predicates, and business logic happens off-chain at the Execution Layer~\cite{exemodel}; the ZK circuit does not see any of it.
+    \item \emph{Batch-amortized proving.} One proof per Aggregation Layer round covers thousands of insertions; there is no per-transaction ZK proof and no anonymity-set scaling.
+    \item \emph{Local update, sublinear cost in tree capacity.} The proof attests only to the modification of a small subset of the SMT---the paths and siblings touched by the batch---rather than the whole tree. Proving effort scales with the batch size and only logarithmically with the current tree capacity, so a single shard can grow without inflating the per-round prover work.
+    \item \emph{Private batch as witness.} The batch contents are bound to the public roots through the in-circuit bus chain but never appear in the public statement, keeping the verifier's work independent of batch size.
+    \item \emph{Custom AIR over a small field.} Hand-built arithmetization with a ZK-friendly hash (Poseidon2) over BabyBear avoids the 32-bit-to-field translation overhead of general-purpose zkVMs.
+    \item \emph{No privacy obligation in-circuit.} Transaction privacy is provided structurally; the ZK proof is used only for succinctness, not for zero-knowledge, removing a constraint family that ZK-rollup and mixer designs typically must satisfy.
+\end{enumerate}
 
 
 \section{System Architecture}

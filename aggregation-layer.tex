@@ -31,7 +31,12 @@
 \algnewcommand{\Assert}{\textbf{assert}\xspace}
 \MakeRobust{\Call} % for nested Calls
 
+\usepackage{amsthm}
 \newtheorem{definition}{Definition}
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}{Lemma}
+\newtheorem{corollary}{Corollary}
+\newtheorem{remark}{Remark}
 
 \tikzset{
     block/.style={rectangle, draw, text centered, minimum height=2em, minimum width=5cm},
@@ -65,7 +70,7 @@
 \maketitle
 
 \begin{abstract}
-Unicity is a novel blockchain protocol with the ambitious goal of enabling token transactions to occur off-chain and, when necessary, offline. This premise requires supporting infrastructure to guarantee that there are no parallel states of assets, or more specifically, that there is no double-spending; a property we term the \textit{unicity}. It turns out that the lack of globally shared state and ordering reduces the blockchain overhead considerably. In designing this infrastructure, no compromises were made regarding its trust assumptions. This paper details the design of the Aggregation Layer, the component responsible for producing Proofs of Inclusion and Non-inclusion to the users. We analyze its design for efficiency and evaluate the robustness of its trust and security model. We then identify a single critical property that the Consensus Layer must verify on each round---\emph{prior-state preservation}---and observe that the remaining desirable properties of the trustless Key-Value store (canonical tree shape, batch incorporation, no phantom inserts, completeness) are not required by the Unicity Aggregator's security model. This statement is implemented~\cite{rsmtair} as Algebraic Intermediate Representation (AIR) circuit on top of the Plonky3~\cite{plonky3} STARK toolkit. The implementation sustains a proving throughput in excess of $10\,000$ insertions per second on a single consumer-class CPU, with a succinct proof and tens of milliseconds verification time, and no trusted setup. Finally, we describe how the per-round proofs of all shards, together with the Consensus Layer's state transitions, are folded into a single recursively aggregated STARK: a fixed-size certificate of the correctness of the system's entire operating history, verifiable against the genesis configuration alone, without trusting the validator set.
+Unicity is a novel blockchain protocol with the ambitious goal of enabling token transactions to occur off-chain and, when necessary, offline. This premise requires supporting infrastructure to guarantee that there are no parallel states of assets, or more specifically, that there is no double-spending; a property we term the \textit{unicity}. It turns out that the lack of globally shared state and ordering reduces the blockchain overhead considerably. In designing this infrastructure, no compromises were made regarding its trust assumptions. This paper details the design of the Aggregation Layer, the component responsible for producing Proofs of Inclusion and Non-inclusion to the users. We analyze its design for efficiency and evaluate the robustness of its trust and security model. We then identify the critical property that the Consensus Layer must verify on each round---\emph{append-only consistency}, combining prior-state preservation with coherent placement of insertions---give it a formal definition, and prove that the RSMT3 consistency proof enforces it over the entire certified history, assuming only collision resistance of the hash function. A critical review shows that the coherent-placement half is not optional: we exhibit a concrete equivocation attack against the structure-only proof. The remaining desirable properties of the trustless Key-Value store (batch incorporation, no phantom inserts, completeness) are not required by the Unicity Aggregator's security model. The structural core of this statement is implemented~\cite{rsmtair} as Algebraic Intermediate Representation (AIR) circuit on top of the Plonky3~\cite{plonky3} STARK toolkit. The implementation sustains a proving throughput in excess of $10\,000$ insertions per second on a single consumer-class CPU, with a succinct proof and tens of milliseconds verification time, and no trusted setup. Finally, we describe how the per-round proofs of all shards, together with the Consensus Layer's state transitions, are folded into a single recursively aggregated STARK: a fixed-size certificate of the correctness of the system's entire operating history, verifiable against the genesis configuration alone, without trusting the validator set.
 \end{abstract}
 
 
@@ -77,13 +82,13 @@ In a hierarchical trustless system, the principle is that the base layer (e.g., 
 
 To scale further, we use cryptographic zero-knowledge proofs (ZKPs) to compress the size of the consistency proofs. As an application of ZKPs, this use-case is fundamentally more efficient than using ZKPs to process the transaction data itself, as is done in many privacy coins and ZK-rollups: the statement being proved is a single tree-update, with the batch as a private witness, not the whole execution trace of a virtual machine.
 
-A useful scoping observation is that the consensus-relevant statement is narrower than ``the SMT was updated correctly''. The Consensus Layer only needs to be convinced that \emph{no previously-recorded leaf was deleted or modified}. The remaining desirable properties of the Aggregation Layer---canonical tree shape, batch incorporation, no phantom inserts, completeness---are self-policed by the protocol layer that lives around the public root commitment: any deviation by a dishonest aggregator at insert time only damages its own ability to serve subsequent inclusion proofs against that root, a denial of service by an operationally replaceable component. Section~\ref{sec:scope} details this scoping argument. The narrowness of the in-circuit statement is what makes the AIR small and the proving cheap.
+A useful scoping observation is that the consensus-relevant statement is narrower than ``the SMT was updated correctly''. The Consensus Layer needs to be convinced that \emph{no previously-recorded leaf was deleted or modified} and that \emph{every new leaf is placed coherently with its key}; the critical review of Section~\ref{sec:critical-review} shows, by a concrete attack, that the second half cannot be dropped. The remaining desirable properties of the Aggregation Layer---batch incorporation, no phantom inserts, completeness---are self-policed by the protocol layer that lives around the public root commitment: their violation only damages the dishonest aggregator's own ability to serve users, a denial of service by an operationally replaceable component. Section~\ref{sec:scope} details this scoping argument, and Section~\ref{sec:consistency-formal} proves that the resulting statement is sufficient. The narrowness of the in-circuit statement is what makes the AIR small and the proving cheap.
 
 In this paper, we show how to scale the Aggregation Layer to $10\,000$ tx/s \emph{per shard} and beyond. This figure was the original design target; the measured proving throughput of our reference implementation exceeds it by roughly $3\times$ on a single consumer-class CPU (Section~\ref{sec:custom-air-circuit}). Due to the small proof size and efficient verification, the Consensus Layer can support a practically unlimited number of such trustless shards. Table~\ref{tab:zk-comparison} compares different ZKP technologies. We have picked subjectively the most appropriate ZK schemes and supporting front-ends (``stacks''); the Plonky3 AIR rows now report measured numbers from our implementation~\cite{rsmtair}.
 
 \begin{table*}[h!]
 \centering
-\caption{Comparison of zero-knowledge proof technologies for compression of non-deletion proofs.}
+\caption{Comparison of zero-knowledge proof technologies for compression of consistency proofs.}
 \label{tab:zk-comparison}
 \begin{tabular}{@{}lccccccc@{}}
 \toprule
@@ -125,7 +130,7 @@ The Aggregation Layer occupies a fairly narrow point in the design space of auth
 
 Sparse Merkle Trees originate as an extension of binary Merkle hash trees to large key spaces: every potential key is assigned a deterministic position, and the proof that a key is absent is just the root computation taken over canonical-empty subtrees. The systematic study of their cost and engineering trade-offs is more recent. Dahlberg, Pulls, and Peeters~\cite{dahlberg2016smt} present efficient SMT constructions and caching strategies for membership and non-membership proofs with realistic key-space sizes; their analysis is part of the foundation that makes deep-keyed SMTs practical. The path-compressed (radix) variant we use in the Aggregation Layer (Section~\ref{sec:custom-air-circuit}) is a constant-factor refinement of the same line of work.
 
-A related and operationally closer system is Certificate Transparency (CT)~\cite{rfc6962}, which maintains append-only Merkle logs of TLS certificates and provides both inclusion and \emph{consistency} proofs between successive signed tree heads. The cryptographic role of the CT consistency proof is conceptually the same as our non-deletion proof: it convinces an auditor that a new log state extends the previous one without rewriting it. The differences are operational: CT logs are chronologically append-only with no key-determined position, log entries are not deduplicated against double-spending semantics, and there is no per-round ZK compression of the consistency witness. Our use of SMTs adds a key-determined position (so that double-spending becomes a key collision) and our use of ZK compresses the per-round witness to a constant size.
+A related and operationally closer system is Certificate Transparency (CT)~\cite{rfc6962}, which maintains append-only Merkle logs of TLS certificates and provides both inclusion and \emph{consistency} proofs between successive signed tree heads. The cryptographic role of the CT consistency proof is conceptually the same as our consistency proof: it convinces an auditor that a new log state extends the previous one without rewriting it. The differences are operational: CT logs are chronologically append-only with no key-determined position, log entries are not deduplicated against double-spending semantics, and there is no per-round ZK compression of the consistency witness. Our use of SMTs adds a key-determined position (so that double-spending becomes a key collision) and our use of ZK compresses the per-round witness to a constant size.
 
 \subsection{Comparison with ZK-Rollups on Ethereum L1}
 
@@ -220,7 +225,7 @@ The Aggregation Layer periodically has its state authenticator certified by the 
 
 The Aggregation layer is sharded based on keyspace slices and can be made hierarchical, as shown in Figure~\ref{fig:sharding}.
 
-\emph{Proof of non-deletion}: Once a key is set, it has to remain there forever. Every state change of the Aggregation Layer (or a slice thereof) is accompanied by a cryptographic proof establishing that pre-existing keys have not been removed or their values altered, only new keys were added. The size of this proof is logarithmic with respect to the tree's capacity and linear with respect to the size of the inclusion batch. This can be reduced to a constant size using a SNARK. Assuming correct validation of the non-deletion proof and chaining of the Aggregation Layer's state roots by the Consensus Layer, the Aggregation Layer can be considered trustless.
+\emph{Consistency proof}: Once a key is set, it has to remain there forever. Every state change of the Aggregation Layer (or a slice thereof) is accompanied by a cryptographic proof establishing that pre-existing keys have not been removed or their values altered, and that new keys were added at the positions determined by the keys themselves. (In earlier documents this artifact is also called a \emph{non-deletion proof}; we use \emph{consistency proof} throughout.) The size of this proof is logarithmic with respect to the tree's capacity and linear with respect to the size of the inclusion batch. This can be reduced to a constant size using a SNARK. Assuming correct validation of the consistency proof and chaining of the Aggregation Layer's state roots by the Consensus Layer, the Aggregation Layer can be considered trustless.
 
 
 \subsection{Execution Layer}
@@ -321,7 +326,7 @@ The SMT provides users with inclusion and non-inclusion proofs. Each proof is an
 
 The Consensus Layer must guarantee data availability. If recent state roots were lost, it would become impossible to reject duplicate state transition requests, potentially allowing malicious actors to double-spend against an old, un-extendable state. The Aggregation Layer itself does not require an internal consensus mechanism; protocols like Raft could be used for replication and coordination among its redundant nodes. The decentralized consensus is provided by the external Consensus Layer.
 
-If each state transition is accompanied by a cryptographic proof of non-deletion (see Section~\ref{sec:consistency-proof}), the Aggregation Layer can be considered trustless.
+If each state transition is accompanied by a cryptographic consistency proof (see Section~\ref{sec:consistency-proof}), the Aggregation Layer can be considered trustless.
 
 
 \subsection{``Maximalist'' Security Assumptions}
@@ -337,7 +342,7 @@ Upon receiving a token, the user must be able to efficiently verify the followin
     \item The Aggregation Layer has not certified conflicting states of the same token.
 \end{enumerate}
 
-The second and third points are covered by the aggregated history proof of Section~\ref{sec:aggregation-audit}: a fixed-size STARK, updated periodically, attesting that the entire sequence of certified states---from the genesis configuration up to a recent round $n$---forms a single non-forking chain in which every round of every shard satisfies the consistency property of Definition~\ref{def:append-only-accumulator}. In particular, no inclusion proof can exist for a token state that is absent from the recorded history. Verifying the aggregate proof requires only the genesis parameters of the network instance and takes milliseconds on commodity hardware; neither replay of history nor trust in the validator set is involved.
+The second and third points are covered by the aggregated history proof of Section~\ref{sec:aggregation-audit}: a fixed-size STARK, updated periodically, attesting that the entire sequence of certified states---from the genesis configuration up to a recent round $n$---forms a single non-forking chain in which every round of every shard satisfies append-only consistency (Definition~\ref{def:aoc}, established by Theorem~\ref{thm:history}). In particular, no inclusion proof can exist for a token state that is absent from the recorded history. Verifying the aggregate proof requires only the genesis parameters of the network instance and takes milliseconds on commodity hardware; neither replay of history nor trust in the validator set is involved.
 
 The aggregate proof is produced with a latency of minutes to hours behind the certified tip, so maximalist verification is not instantaneous. It is best understood as an audit mechanism: it retrospectively confirms---or refutes, with the failure round pinpointed---the correctness of operation of the Consensus and Aggregation Layers. The validation procedure is given in Section~\ref{sec:maxi-validation}.
 
@@ -354,41 +359,43 @@ The Root of Trust is the Unicity Trust Base: the chain of epoch records of the B
 \subsection{Scope of the In-Circuit Statement}
 \label{sec:scope}
 
-A core engineering choice in the design of the Aggregation Layer's consistency proof is to push as much of the per-round security argument out of the cryptographic proof as possible, leaving only a small kernel inside the circuit. The observation behind this choice is not deep: an aggregator node is an operationally disposable component, and misbehavior outside the critical property manifests as denial of service against itself, remedied by failover to a replica rather than by cryptography. The value of the scoping is engineering economy---it keeps the circuit small. We make it explicit below.
+A core engineering choice in the design of the Aggregation Layer's consistency proof is to push as much of the per-round security argument out of the cryptographic proof as possible, leaving only a small kernel inside the circuit. The value of the scoping is engineering economy---it keeps the circuit small. Drawing the boundary correctly, however, requires care: it is tempting to place \emph{all} placement-related properties outside the kernel, on the argument that a misplaced insertion only damages the aggregator's own ability to serve proofs. Section~\ref{sec:critical-review} refutes that argument by a concrete attack; the boundary is drawn below and proved sufficient in Section~\ref{sec:consistency-formal}.
 
-Let $M_{i-1}, M_i \colon \{0,1\}^* \to \{0,1\}^* \cup \{\bot\}$ be the partial maps of recorded key-value bindings committed by, respectively, the previous and the new state roots $r_{i-1}, r_i$. We say the round update $r_{i-1} \to r_i$ satisfies \emph{prior-state preservation} iff
+Let $M_{i-1}, M_i \colon \{0,1\}^* \to \{0,1\}^* \cup \{\bot\}$ be the partial maps of recorded key-value bindings committed by, respectively, the previous and the new state roots $r_{i-1}, r_i$ (Section~\ref{sec:consistency-formal} makes ``committed by'' precise). We say the round update $r_{i-1} \to r_i$ satisfies \emph{prior-state preservation} iff
 \begin{equation}
   \forall k \in \mathrm{dom}(M_{i-1})\colon\quad M_i(k) = M_{i-1}(k).
   \label{eq:psp}
 \end{equation}
 That is, every key already recorded under $r_{i-1}$ is bound to the same value under $r_i$. Equivalently, the round adds a (possibly empty) set of fresh keys and modifies nothing.
 
-\begin{definition}[Minimal in-circuit statement]
+\begin{definition}[In-circuit statement, informal]
 \label{def:minimal}
-For an SMT-instantiated Aggregation Layer, the cryptographic per-round consistency proof needs to enforce only \eqref{eq:psp}, given authentic roots $(r_{i-1}, r_i)$.
+For the Aggregation Layer, the cryptographic per-round consistency proof must enforce, given authentic roots $(r_{i-1}, r_i)$: (i) prior-state preservation \eqref{eq:psp}, and (ii) \emph{coherent placement}: every leaf inserted in the round sits at the position determined by its own key. Definition~\ref{def:aoc} states this formally.
 \end{definition}
 
-The other desirable properties of the Aggregation Layer can be enumerated and accounted for as follows:
+Clause (ii) is important. Because the maps $M_i$ are realized by \emph{provability} against the root---a binding is ``recorded'' exactly when an inclusion proof for it verifies---an incoherently placed insertion changes which bindings are provable, for old keys as well as new ones. Section~\ref{sec:critical-review} shows that dropping (ii) admits verifying round transitions under which an already-recorded key becomes re-recordable with a different value: the equivocation that \eqref{eq:psp} is meant to exclude.
+
+The remaining desirable properties of the Aggregation Layer stay outside the kernel, and can be enumerated and accounted for as follows:
 
 \begin{description}[nosep]
-    \item[Completeness] (\emph{every well-formed user request appears in the next round}). A censoring aggregator does not violate prior-state preservation; it merely fails to serve some users. The protocol mitigates this by replication (highly-available cluster) and by allowing users to resubmit through alternative aggregators in the same shard.
+    \item[Completeness] (\emph{every well-formed user request appears in the next round}). A censoring aggregator does not violate the in-circuit statement; it merely fails to serve some users. The protocol mitigates this by replication (highly-available cluster) and by allowing users to resubmit through alternative aggregators in the same shard.
     \item[Batch incorporation proof] (\emph{the round proof testifies to inclusion of every batch element}). Rather than have the consistency proof carry per-element inclusion claims, we let the Aggregation Layer serve fresh inclusion proofs on demand against the certified root. An aggregator that does not actually insert the batch will simply fail to produce valid inclusion proofs later, which is detectable by recipients.
-    \item[No phantom inserts] (\emph{nothing is recorded that was not a user request}). At worst, an aggregator does free recording work for itself or third parties; it cannot affect any honest user's tokens, because their state IDs are unrelated to the phantom entries.
-    \item[Canonical tree shape] (\emph{the post-state tree is the unique one prescribed by the SMT rules}). A non-canonical insertion produces a root that the aggregator cannot subsequently extend by canonical inclusion proofs for those keys; downstream verifiers reject. The aggregator only denies service to itself.
-    \item[Non-deletion / prior-state preservation] (\emph{equation \eqref{eq:psp}}). \emph{Critical.} If this fails, the operator can rewrite history and double-spending becomes possible. This is the property that must be cryptographically enforced \emph{before} round certification.
+    \item[No phantom inserts] (\emph{nothing is recorded that was not a user request}). At worst, an aggregator does free recording work for itself or third parties; phantom entries carry fresh keys (coherent placement forbids re-recording), so they cannot affect any honest user's tokens.
+    \item[Global canonical shape] (\emph{the post-state tree is the unique tree prescribed by the data structure's rules for its key set}). This does not need to be postulated as a separate in-circuit obligation: as Theorem~\ref{thm:history} shows, coherent placement, applied round by round from the empty genesis tree, already forces every certified tree to be canonical.
+    \item[Append-only consistency] (\emph{\eqref{eq:psp} together with coherent placement; Definition~\ref{def:aoc}}). \emph{Critical.} If this fails, the operator can rewrite history and double-spending becomes possible. This is the property that must be cryptographically enforced \emph{before} round certification.
 \end{description}
 
-Restricting the in-circuit statement to \eqref{eq:psp} has several useful consequences. First, the witness need not contain the actual batch contents---the prover may keep them entirely private and bind them to the proof through the soundness chain of the circuit (Section~\ref{sec:custom-air-circuit}). This shrinks the public statement to the two root digests. Second, the circuit does not have to encode the canonical-shape rules of the underlying SMT variant, which is by far the most constraint-heavy aspect of any naive arithmetization (cf.~\cite{rsmtair}, ``cost-of-canonical detour''). Third, the proof scales with the batch size alone, not with the total tree capacity.
+Restricting the in-circuit statement to append-only consistency has several useful consequences. First, the witness need not contain the actual batch contents---the prover may keep them entirely private and bind them to the proof through the soundness chain of the circuit (Section~\ref{sec:custom-air-circuit}). This shrinks the public statement to the two root digests. Second, the circuit does not have to \emph{reconstruct} canonical shape from scratch, which is by far the most constraint-heavy aspect of any naive arithmetization (cf.~\cite{rsmtair}, ``cost-of-canonical detour''); with the region-committing hash of Section~\ref{sec:stack-verifier}, coherent placement is checked by local constraints on the touched nodes only. Third, the proof scales with the batch size alone, not with the total tree capacity.
 
 
-\section{Non-deletion Proof}
+\section{Consistency Proof}
 \label{sec:consistency-proof}
 
-A non-deletion proof is a cryptographic construction that validates one round of operation of  the append-only accumulator.
+A \emph{consistency proof} is a cryptographic construction that validates one round of operation of the append-only accumulator.
 
 We have the $i$-th batch of insertions $B_i = (k_1, k_2, \dots, k_j)$, where $k$ is an inserted item; all insertions are applied within a single operational round. The root hash before the round is $r_{i-1}$, and after the round is $r_i$. The accumulator is implemented as a Sparse Merkle Tree (SMT).
 
-The non-deletion proof generation for batch $B_i$ works as follows:
+The consistency proof generation for batch $B_i$ works as follows:
 
 \begin{enumerate}
     \item The new leaves in batch $B_i$ are inserted into the SMT.
@@ -414,9 +421,9 @@ Complete verification algorithm is presented as Algorithm~\ref{alg:verifynondele
 Due to the sparseness of the SMT we can further improve the encoding, for example, instead of checking if a node's sibling is the next item in layer's nodes or the next item in proof array or empty element otherwise, we just record a number--how many of the next siblings are empty elements (frequent close to the leaves when SMT is sparsely populated); and same with siblings (frequent close to the root).
 
 \begin{algorithm}[htb]
-  \caption{Verification of non-deletion proof}\label{alg:verifynondeletion}
+  \caption{Layer-by-layer verification of the consistency proof (plain SMT)}\label{alg:verifynondeletion}
   \begin{algorithmic}[0]
-    \Function{VerifyNonDeletion}{$\pi, r_{i-1}, r_i, P$}
+    \Function{VerifyConsistencySMT}{$\pi, r_{i-1}, r_i, P$}
       \State   \Comment{Proof $\pi$ is a by-layer array of ...}
       \State   \Comment{... sorted arrays of k-v tuples}
       \State   \Comment{Insertion batch $P$ is ...}
@@ -466,74 +473,265 @@ Due to the sparseness of the SMT we can further improve the encoding, for exampl
 \subsection{Stack-Machine Verification for the Path-Compressed Tree}
 \label{sec:stack-verifier}
 
-Algorithm~\ref{alg:verifynondeletion} is formulated for the plain, fixed-depth SMT used as the model throughout this paper. Later implementations use the path-compressed RSMT3 tree (Section~\ref{sec:custom-air-circuit}) and a redesigned proof encoding, which replaces the layer-by-layer forest computation with a stack machine executing a flat opcode stream. This encoding is what the production verifier and the AIR arithmetization of Section~\ref{sec:custom-air-circuit} operate on.
+Algorithm~\ref{alg:verifynondeletion} is formulated for the plain, fixed-depth SMT used as the model throughout this paper; it is also the encoding on which the early ZK experiments of the following sections were built, and it is retained for that reason. Production implementations use the path-compressed RSMT3 tree (Section~\ref{sec:custom-air-circuit}) and a transcript-based encoding, executed by a stack machine. This subsection specifies the encoding and its verifier; Section~\ref{sec:critical-review} explains why the coherence machinery is necessary, and Sections~\ref{sec:consistency-formal}--\ref{sec:consistency-theorem} prove the construction sufficient.
 
-In RSMT3, a leaf hashes the full key together with the value,
-\[ h_L = H(\texttt{0x00} \parallel k \parallel v), \]
-and an internal (junction) node hashes its two children together with its explicit bifurcation depth $d$,
-\[ h_N = H(\texttt{0x01} \parallel d \parallel h_l \parallel h_r). \]
-The domain-separation prefixes make leaf and node hashes disjoint; the depth commitment prevents re-attaching a subtree at a different level; and placing $h_l$ and $h_r$ at fixed positions prevents swapping children. Crucially, neither hash depends on the edge (common-prefix) structure above the node: inserting new keys may split an edge above an existing node, but never changes the hash of any pre-existing node---it only creates new leaf and junction hashes. This immutability of pre-state hashes is what the proof encoding exploits. (The hash function is an instantiation detail: the portable reference implementation uses SHA-256, the AIR uses a Poseidon2 sponge.)
+A leaf hashes the full key together with the value, and a junction hashes its two children together with its bifurcation depth $d$ and its \emph{region} $p$:
+\begin{align*}
+  h_L &= H(\texttt{0x00} \parallel k \parallel v),\\
+  h_N &= H(\texttt{0x01} \parallel \langle d\rangle \parallel \langle p\rangle \parallel h_l \parallel h_r).
+\end{align*}
+The region $p \in \{0,1\}^d$ is the key prefix that addresses the node: every key below the junction extends $p$, with $p\|0$ leading left and $p\|1$ leading right; $\langle\cdot\rangle$ are fixed-length injective encodings. A leaf's region is its full key, and its depth is $\kappa = 256$. (We write $\varrho[j]$ for bit $j$ of a region and $\varrho[0..d)$ for its first $d$ bits.) The domain-separation prefixes make leaf and junction hashes disjoint; the depth commitment prevents re-attaching a subtree at a different level; the region commitment pins the node to its key-space position; and fixed child positions prevent swapping. Crucially, depth and region are \emph{absolute} properties of a node---splitting an edge above it changes neither---so inserting new keys never re-hashes any pre-existing node: an insertion creates only new leaf and junction hashes. This immutability of pre-state hashes is what the proof encoding exploits. (The hash function is an instantiation detail: the portable reference implementation uses SHA-256, the AIR a Poseidon2 sponge.) Inclusion proofs transmit only junction depths and sibling digests: the verifier reconstructs the expected region of every junction on the path from the queried key itself, as $k[0..d_j)$.
 
-The consistency proof $\pi$ for round $i$ is the post-order serialization of the \emph{touched} part of the post-state tree, over a three-opcode alphabet:
+The consistency proof $\pi$ for round $i$ is the post-order serialization of the \emph{touched} part of the post-state tree, over a five-opcode alphabet:
 \begin{description}[nosep]
-  \item[$S(h)$:] an untouched pre-state subtree with digest $h$;
+  \item[$S(c)$:] an untouched pre-state subtree, as an opaque digest;
+  \item[$O(d', p', c_l, c_r)$:] an untouched pre-state junction, opened one level; the verifier hashes the opening, so the annotations are collision-bound to the digest;
+  \item[$O_L(k', v')$:] an untouched pre-state leaf, opened;
   \item[$L$:] a leaf newly inserted in this round; its key and value are not part of the proof, but are consumed from the batch $B_i$;
-  \item[$N(d)$:] a junction at bifurcation depth $d$, whose two children are the two preceding stack entries.
+  \item[$N(d)$:] a junction at bifurcation depth $d$, over the two preceding stack entries. Junction regions do not travel in the proof; the verifier derives them.
 \end{description}
 
-The verifier (Algorithm~\ref{alg:stackverify}) executes the stream against a stack of digest pairs $(h^{\mathsf{old}}, h^{\mathsf{new}})$, evaluating every subtree in the pre-state and the post-state simultaneously. The batch is sorted by the verifier itself into tree-traversal order (depth-first, by key bits from the root), so the prover has no freedom in associating $L$ opcodes with batch elements. The pre-state digest of a junction follows a four-way rule: if both children existed in the pre-state, the junction existed too and its old digest is recomputed; if exactly one child existed, the junction did not exist in the pre-state, and the old digest of the existing child passes through unchanged; if neither existed, the old digest is the empty marker $\varnothing$. The pass-through cases are what keep add-only proofs short: no hashing is performed on the parts of the tree that did not change.
+The verifier (Algorithm~\ref{alg:stackverify}) executes the stream against a stack of triples: the subtree's pre-state digest, its post-state digest, and an \emph{advice tuple} $(\delta, \varrho)$---the depth and region of the subtree's top node, $(\kappa, k)$ for leaves, absent ($\bot$) for opaque $S$ entries. The batch is sorted by the verifier itself into tree-traversal order and must be strictly increasing, so the prover has no freedom in associating $L$ opcodes with batch elements. Processing $N(d)$ combines three rule families:
+\begin{enumerate}[nosep]
+  \item \emph{Edge coherence.} Every child that carries advice must satisfy $\delta > d$ and $\varrho[d] = \beta$, where $\beta$ is the child's side. The first $d$ bits of $\varrho$ yield the junction's region $p$; all advised children must agree on it, and at least one child must be advised, so $p$ is always defined.
+  \item \emph{Confinement of opaque subtrees.} If the junction is absent from the pre-state---its old side arises by pass-through or $\varnothing$---then \emph{both} children must carry advice. An opaque $S$ may therefore appear only under pre-existing junctions, whose edges were checked in the round that created them and are frozen by the hashes; wherever a preserved subtree meets a new junction, the prover must present its opened form.
+  \item \emph{Digest algebra.} The pre-state digest of a junction follows a four-way rule: if both children existed in the pre-state, the junction existed too and its old digest is recomputed; if exactly one child existed, the junction is new and the old digest of the existing child passes through unchanged; if neither existed, the old digest is the empty marker $\varnothing$. The post-state digest is always recomputed. The pass-through cases are what keep consistency proofs short: no hashing is performed on the parts of the tree that did not change.
+\end{enumerate}
 
 \begin{algorithm}[H]
   \caption{Stack-machine verification of the RSMT3 consistency proof}\label{alg:stackverify}
-  \small
+  \footnotesize
   \begin{algorithmic}[0]
     \Function{VerifyConsistency}{$\pi, r_{i-1}, r_i, B$}
       \If{$B = [\,]$}
-        \State \Return $r_{i-1} = r_i$
+        \State \Return $r_{i-1} = r_i \;\land\; \pi = [\,]$
       \EndIf
       \State $B \gets \Call{SortTraversalOrder}{B}$
+      \State \textbf{assert} keys of $B$ strictly increasing
       \State $\mathit{st} \gets [\,]$; \quad $b \gets 0$ \Comment{stack; batch index}
       \For{opcode $o$ \textbf{in} $\pi$}
-        \If{$o = S(h)$}
-          \State \Call{Push}{$\mathit{st}, (h, h)$}
-        \ElsIf{$o = L$}
+        \If{$o = S(c)$, $c \neq \varnothing$} \Comment{opaque subtree}
+          \State \Call{Push}{$\mathit{st}, (c, c, \bot)$}
+        \ElsIf{$o = O(d', p', c_l, c_r)$} \Comment{opening}
+          \State $c \gets H(\texttt{0x01} \| \langle d'\rangle \| \langle p'\rangle \| c_l \| c_r)$
+          \State \Call{Push}{$\mathit{st}, (c, c, (d', p'))$}
+        \ElsIf{$o = O_L(k', v')$} \Comment{opened leaf}
+          \State \Call{Push}{$\mathit{st}, (c, c, (\kappa, k'))$}, $c = H(\texttt{0x00} \| k' \| v')$
+        \ElsIf{$o = L$} \Comment{new leaf}
           \State $(k, v) \gets B[b]$; \quad $b \gets b + 1$
-          \State \Call{Push}{$\mathit{st}, (\varnothing,\; H(\texttt{0x00} \| k \| v))$}
-        \ElsIf{$o = N(d)$}
-          \State $(h^{\mathsf{o}}_r, h^{\mathsf{n}}_r) \gets \Call{Pop}{\mathit{st}}$
-          \State $(h^{\mathsf{o}}_l, h^{\mathsf{n}}_l) \gets \Call{Pop}{\mathit{st}}$
-          \If{$h^{\mathsf{o}}_l = \varnothing \land h^{\mathsf{o}}_r = \varnothing$}
-             \State $h^{\mathsf{o}} \gets \varnothing$
-          \ElsIf{$h^{\mathsf{o}}_l = \varnothing$}
-             \State $h^{\mathsf{o}} \gets h^{\mathsf{o}}_r$ \Comment{pass-through}
-          \ElsIf{$h^{\mathsf{o}}_r = \varnothing$}
-             \State $h^{\mathsf{o}} \gets h^{\mathsf{o}}_l$ \Comment{pass-through}
-          \Else
-             \State $h^{\mathsf{o}} \gets H(\texttt{0x01} \| d \| h^{\mathsf{o}}_l \| h^{\mathsf{o}}_r)$
+          \State \Call{Push}{$\mathit{st}, (\varnothing,\; H(\texttt{0x00} \| k \| v),\; (\kappa, k))$}
+        \ElsIf{$o = N(d)$} \Comment{junction}
+          \State $(c^{\mathsf o}_r, c^{\mathsf n}_r, a_r) \gets \Call{Pop}{\mathit{st}}$
+          \State $(c^{\mathsf o}_l, c^{\mathsf n}_l, a_l) \gets \Call{Pop}{\mathit{st}}$
+          \State $p \gets \bot$
+          \For{$x \in \{l, r\}$ with side bit $\beta \in \{0, 1\}$}
+            \If{$a_x = (\delta_x, \varrho_x) \neq \bot$} \Comment{coherence}
+              \State \textbf{assert} $\delta_x > d \;\land\; \varrho_x[d] = \beta$
+              \State \textbf{assert} $p = \bot \;\lor\; p = \varrho_x[0..d)$
+              \State $p \gets \varrho_x[0..d)$
+            \EndIf
+          \EndFor
+          \State \textbf{assert} $p \neq \bot$
+          \If{$c^{\mathsf o}_l = \varnothing \lor c^{\mathsf o}_r = \varnothing$} \Comment{new junction}
+            \State \textbf{assert} $a_l \neq \bot \;\land\; a_r \neq \bot$
           \EndIf
-          \State $h^{\mathsf{n}} \gets H(\texttt{0x01} \| d \| h^{\mathsf{n}}_l \| h^{\mathsf{n}}_r)$
-          \State \Call{Push}{$\mathit{st}, (h^{\mathsf{o}}, h^{\mathsf{n}})$}
+          \If{$c^{\mathsf o}_l = \varnothing \land c^{\mathsf o}_r = \varnothing$}
+            \State $c^{\mathsf o} \gets \varnothing$
+          \ElsIf{$c^{\mathsf o}_l = \varnothing$}
+            \State $c^{\mathsf o} \gets c^{\mathsf o}_r$ \Comment{pass-through}
+          \ElsIf{$c^{\mathsf o}_r = \varnothing$}
+            \State $c^{\mathsf o} \gets c^{\mathsf o}_l$ \Comment{pass-through}
+          \Else
+            \State $c^{\mathsf o} \gets H(\texttt{0x01} \| \langle d\rangle \| \langle p\rangle \| c^{\mathsf o}_l \| c^{\mathsf o}_r)$
+          \EndIf
+          \State $c^{\mathsf n} \gets H(\texttt{0x01} \| \langle d\rangle \| \langle p\rangle \| c^{\mathsf n}_l \| c^{\mathsf n}_r)$
+          \State \Call{Push}{$\mathit{st}, (c^{\mathsf o}, c^{\mathsf n}, (d, p))$}
         \Else
           \State \Return $0$ \Comment{unknown opcode}
         \EndIf
       \EndFor
       \State \textbf{assert} $b = |B| \;\land\; |\mathit{st}| = 1$
-      \State $(h^{\mathsf{o}}, h^{\mathsf{n}}) \gets \mathit{st}[0]$
-      \State \Return $h^{\mathsf{o}} = r_{i-1} \,\land\, h^{\mathsf{n}} = r_i$
+      \State \Return $\mathit{st}[0].(c^{\mathsf o}, c^{\mathsf n}) = (r_{i-1}, r_i)$
     \EndFunction
   \end{algorithmic}
 \end{algorithm}
 
-Verification accepts iff the opcode stream and the batch are both fully consumed, the stack holds exactly one pair, and that pair equals $(r_{i-1}, r_i)$; any stack underflow or batch overrun rejects. The verifier is a short loop ($\sim$60 lines in the reference implementation) with no recursion; its memory use is bounded by the tree depth, and the post-order format makes verification a natural streaming computation.
+Verification accepts iff the opcode stream and the batch are both fully consumed, the stack holds exactly one triple, and its digest pair equals $(r_{i-1}, r_i)$; any stack underflow or batch overrun rejects. The verifier is a short loop with no recursion and no control flow beyond opcode dispatch---one uniform rule per opcode; its memory use is bounded by the tree depth, and the post-order format makes verification a natural streaming computation. This regularity is deliberate: it is what the AIR arithmetization of Section~\ref{sec:custom-air-circuit} exploits, one trace row per opcode with a fixed constraint family. In-circuit, deriving the junction regions costs nothing extra---the derivation equalities \emph{are} the edge-coherence constraints, and the region limbs appear as hash inputs either way. Relative to the structural fragment of the statement (opcodes $S$, $L$, $N$ and the digest algebra alone), the coherence machinery costs region limbs in the Poseidon2 junction preimage (roughly one additional permutation per junction hash), the bit-prefix comparisons, and the openings ($\approx$ one extra hash per batch element); we estimate the dominant Poseidon2 table grows by a factor of at most $1.5$. The measured throughput of Section~\ref{sec:measured}, which covers the structural fragment, leaves ample headroom above the $10\,000$\,tx/s design target.
 
-The soundness argument, informally: reconstructing $r_{i-1}$ forces the proof to cover every branch of the pre-state tree, with every covered subtree contributed as $S(h)$---which, by construction, reappears unchanged under $r_i$; depth commitment and child ordering exclude relocation and swapping; and the independent sorting plus the exhaustion checks bind each $L$ opcode to exactly one batch element. The algorithm deliberately does \emph{not} establish that the post-state is the canonical radix tree of its key set; as discussed in Section~\ref{sec:scope}, a non-canonical post-state only damages the operator's own ability to serve inclusion proofs. A formal, machine-checkable proof that Algorithm~\ref{alg:stackverify} enforces prior-state preservation~\eqref{eq:psp} is left for future work; this section fixes the model and the algorithm that such a proof will target.
+For the honest prover, the transcript differs from a bare depth-only encoding only in the openings: one opened junction or leaf per split edge---the node the insertion descends past last. Measured with the reference implementation on a batch of $1\,000$ insertions into a tree of $10^4$ keys, the transcript is within $15\%$ of the size of the depth-only encoding; the derived regions cost nothing on the wire.
+
+\subsection{Why Coherent Placement Is Necessary}
+\label{sec:critical-review}
+
+Everything in Algorithm~\ref{alg:stackverify} beyond the digest algebra---the region in the junction hash, the openings, the edge-coherence checks---exists to enforce coherent placement, and it is legitimate to ask whether the expense is necessary. Consider the natural minimal alternative, the \emph{structure-only} proof: the junction hash commits the depth alone, $h_N = H(\texttt{0x01} \| \langle d\rangle \| h_l \| h_r)$; the alphabet shrinks to $S(h)$, $L$, $N(d)$; and the verifier keeps only the four-way digest algebra. This variant does enforce \emph{structural preservation}: reconstructing $r_{i-1}$ forces the proof to cover every branch of the pre-state tree; every covered subtree reappears, unmodified, under $r_i$ (depth commitment and child ordering exclude relocation and swapping); each $L$ is bound to exactly one batch element by the sorting and exhaustion checks; and there is no third source of leaves. It even binds values under any \emph{single} root: two verifying inclusion proofs for $(k,v)$ and $(k,v')$ against the same digest force, level by level from the root, equal hash preimages (anything else is a collision) and---because the descent direction is recomputed from $k$'s bits---the same path, terminating in $H(\texttt{0x00}\,\|\,k\,\|\,v) = H(\texttt{0x00}\,\|\,k\,\|\,v')$, i.e., $v = v'$ or a collision.
+
+What structural preservation does not do is relate the batch's keys to the \emph{positions} at which the new leaves are attached. The Aggregation Layer's security model, however, is stated in terms of provability: a binding $(k,v)$ is \emph{recorded} under a certified root $r$ exactly when an inclusion proof for it verifies against $r$---this is what a Proof of Unicity is. Under this semantics, the structure-only guarantee fails, and it fails \emph{across} rounds.
+
+\paragraph{The shadow-insertion attack.}
+Let the pre-state be any tree containing the recorded binding $(k,v)$, with certified root $r_{i-1}$; for concreteness, the tree consisting of that single leaf. A Byzantine aggregator (prompted, say, by a user attempting a double-spend of the token state $k$) picks any depth $d^{*}$ with $k[d^{*}] = 1$ and submits the batch $B_i = \{(k, v')\}$, $v' \neq v$, with the three-opcode proof
+\[ \pi = \big(\,S(r_{i-1}),\; L,\; N(d^{*})\,\big). \]
+The structure-only verifier accepts: the old side of $N(d^{*})$ is the pass-through of $S$'s digest, reproducing $r_{i-1}$ exactly, and the new side yields
+$r_i = H\big(\texttt{0x01} \| d^{*} \| r_{i-1} \| H(\texttt{0x00} \| k \| v')\big)$.
+Against the certified $r_i$, the one-step inclusion proof for $(k, v')$---sibling $r_{i-1}$, depth $d^{*}$, direction $k[d^{*}] = 1$---verifies. The construction is depicted in Figure~\ref{fig:shadow}. The consequences:
+\begin{enumerate}[nosep]
+  \item \emph{Cross-round equivocation.} $(k,v)$ is recorded under $r_{i-1}$ and $(k,v')$ is recorded under $r_i$: two conflicting spends of the same token state, both anchored to certified roots. This is precisely the event the Aggregation Layer exists to prevent.
+  \item \emph{Retroactive orphaning.} Under $r_i$, the binding $(k,v)$ is no longer provable: any path to it now passes the new junction in direction $0 \neq k[d^{*}]$. More generally, a single misdirected junction placed above any preserved subtree orphans \emph{every} binding in that subtree---third parties' tokens, not the operator's own.
+  \item \emph{Undetectability.} Every structure-only check passes: the BFT Core would certify the round, and even the full-history audit of Section~\ref{sec:aggregation-audit}, which verifies exactly these consistency proofs, would accept.
+\end{enumerate}
+We have confirmed the attack against a reference implementation of the structure-only verifier. Placement, in short, is not a self-regarding property: a misplaced junction damages third parties, undetectably.
+
+\begin{figure}[!htbp]
+    \centering
+\begin{tikzpicture}[font=\small,
+  lf/.style={rectangle, draw, align=center, minimum height=1.8em, inner sep=4pt},
+  jn/.style={circle, draw, inner sep=2pt}]
+  % pre-state
+  \node[lf] (pre) {$\mathsf{Leaf}(k,v)$};
+  \node[above=0.35cm of pre, font=\scriptsize] {$r_{i-1}$};
+  % post-state
+  \node[jn, right=2.6cm of pre, yshift=0.55cm] (top) {$d^{*}$};
+  \node[above=0.15cm of top, font=\scriptsize] {$r_i$};
+  \node[lf, below left=0.7cm and 0.35cm of top] (old) {$\mathsf{Leaf}(k,v)$};
+  \node[lf, below right=0.7cm and 0.35cm of top] (new) {$\mathsf{Leaf}(k,v')$};
+  \draw (top) -- node[left, font=\scriptsize] {$0$} (old);
+  \draw (top) -- node[right, font=\scriptsize] {$1$} (new);
+  \node[below=0.15cm of old, font=\scriptsize] {orphaned};
+  \node[below=0.15cm of new, font=\scriptsize] {provable};
+  \draw[arrow, dashed] ([xshift=0.35cm]pre.east) -- node[above, font=\scriptsize] {$\pi$ verifies} ([xshift=-0.12cm]old.west|-pre.east);
+\end{tikzpicture}
+    \caption{Shadow insertion: with $k[d^{*}] = 1$, the verifier's key-directed descent under $r_i$ reaches $(k,v')$; the preserved $(k,v)$ is unreachable. The structure-only consistency proof $(S(r_{i-1}), L, N(d^{*}))$ verifies.}\label{fig:shadow}
+\end{figure}
+
+\paragraph{Repair.}
+The root cause is that the depth commitment binds nodes to \emph{levels}, not to \emph{key-space positions}, while $S$ subtrees are opaque digests---so no verifier-side constraint can relate the batch's keys to the regions of key space already occupied. Two repairs present themselves. The \emph{witness route} keeps the hashes and requires, per inserted key, an opened descent into the pre-state establishing freshness of the key and the canonical split point; this costs an opened path ($O(\log n)$ hash openings) per insertion. The \emph{commitment route} moves the region into the junction hash, after which coherence becomes a local check over the touched nodes, with a single one-level opening per split edge; it is cheaper in-circuit, yields simpler invariants, and preserves the insert-immutability of pre-existing hashes, because a node's region---unlike its edge structure---is invariant under insertions above it. Algorithm~\ref{alg:stackverify} is the commitment route. Revisiting the attack against it: the new junction $N(d^{*})$ must present its preserved child opened, and edge coherence demands that the opened child's region extend $p\|0$ while the new leaf's key extends $p\|1$; since the preserved subtree containing $(k,v)$ has a region that is a prefix of $k$, both conditions cannot hold with the leaf key $k$ on the other side. The attack---and, as Theorem~\ref{thm:round} shows, every attack of its kind---is excluded. A further consequence (Theorem~\ref{thm:history}) is that globally canonical shape comes for free: what naively looks like the heavyweight obligation of proving canonical construction reduces to one opening per insertion and a family of local bit-comparisons.
+
+\subsection{Formal Model}
+\label{sec:consistency-formal}
+
+We fix the key length $\kappa = 256$, key space $\mathcal{K} = \{0,1\}^{\kappa}$, a value space $\mathcal{V} \subseteq \{0,1\}^{*}$, and a hash function $H \colon \{0,1\}^{*} \to \{0,1\}^{\lambda}$. For bit strings, $p \sqsubseteq q$ denotes that $p$ is a prefix of $q$, $q[j]$ the $j$-th bit, and $q[0..d)$ the first $d$ bits. All statements below are unconditional reductions: they conclude either the stated property, or that two distinct strings with equal $H$-images (\emph{a collision}) are computable in time linear in the size of the objects at hand. $\varnothing$ is a distinguished constant outside $\{0,1\}^{\lambda}$.
+
+\begin{definition}[Hash trees]
+\label{def:hashtree}
+Trees are generated by $T ::= \mathsf{Leaf}(k, v) \mid \mathsf{Node}(d, p, T_l, T_r)$ with $k \in \mathcal{K}$, $v \in \mathcal{V}$, $0 \le d < \kappa$, $p \in \{0,1\}^{d}$; $\varepsilon$ denotes the empty tree. Digest, region, and depth:
+\begin{align*}
+\mathsf{dig}(\mathsf{Leaf}(k,v)) &= H(\texttt{0x00} \| k \| v),\\
+\mathsf{dig}(\mathsf{Node}(d,p,l,r)) &= H(\texttt{0x01} \| \langle d\rangle \| \langle p\rangle \| \mathsf{dig}(l) \| \mathsf{dig}(r)),
+\end{align*}
+$\mathsf{dig}(\varepsilon) = \varnothing$; $\mathsf{reg}(\mathsf{Leaf}(k,v)) = k$, $\mathsf{reg}(\mathsf{Node}(d,p,\cdot,\cdot)) = p$; $\mathsf{dep}(\mathsf{Leaf}) = \kappa$, $\mathsf{dep}(\mathsf{Node}(d,\ldots)) = d$.
+\end{definition}
+
+\begin{definition}[Well-formed and canonical trees]
+\label{def:wf}
+$\varepsilon$ and leaves are well-formed; $\mathsf{Node}(d,p,l,r)$ is well-formed iff $l, r$ are, $\mathsf{dep}(l) > d$, $\mathsf{dep}(r) > d$, $p\|0 \sqsubseteq \mathsf{reg}(l)$, and $p\|1 \sqsubseteq \mathsf{reg}(r)$. A well-formed tree is \emph{canonical} iff, for every junction, $p$ is the longest common prefix of the keys of the leaves below it.
+\end{definition}
+
+\begin{lemma}[Represented map]
+\label{lem:map}
+In a well-formed tree $T$, every leaf key extends the region of each of its ancestors, and distinct leaves carry distinct keys; hence $T$ represents a partial map $\mathsf{map}(T) = \{k \mapsto v \mid \mathsf{Leaf}(k,v) \in T\}$. Moreover, for every finite key-value map there is exactly one canonical tree.
+\end{lemma}
+\begin{proof}
+The first claim is immediate by induction over the well-formedness conditions. For distinctness: two leaves with the same key $k$ would sit on opposite sides of their lowest common ancestor $\mathsf{Node}(d, p, \cdot, \cdot)$, forcing both $p\|0 \sqsubseteq k$ and $p\|1 \sqsubseteq k$---impossible. Uniqueness of the canonical tree follows by induction on the key set: a singleton forces a leaf; otherwise the root junction's region and depth are forced to the longest common prefix and its length, which also splits the key set into the two forced child sets.
+\end{proof}
+
+\begin{definition}[Inclusion verification]
+\label{def:incl}
+An inclusion proof for $(k, v)$ against a root $r$ is a sequence $\gamma = \big((d_1, s_1), \ldots, (d_m, s_m)\big)$ with $\kappa > d_1 > \cdots > d_m \ge 0$. The verifier computes $c_0 = H(\texttt{0x00} \| k \| v)$ and, for $j = 1, \ldots, m$,
+\[
+c_j = \begin{cases}
+H(\texttt{0x01} \| \langle d_j\rangle \| \langle k[0..d_j)\rangle \| c_{j-1} \| s_j) & \text{if } k[d_j] = 0,\\
+H(\texttt{0x01} \| \langle d_j\rangle \| \langle k[0..d_j)\rangle \| s_j \| c_{j-1}) & \text{if } k[d_j] = 1,
+\end{cases}
+\]
+and accepts iff $c_m = r$. (Regions are not transmitted; the verifier derives them from $k$.) A \emph{non-inclusion witness} for $k$ against $r$ is a chain of openings from the root along $k$'s descent: junction openings $(d_j, p_j, c^0_j, c^1_j)$ whose $H$-images chain from $r$ downward through the $k[d_j]$-side child, with $p_j = k[0..d_j)$ for all but the last element, terminating either in a junction opening whose region is \emph{not} a prefix of $k$, or in an opened leaf with key $\neq k$; also, $r = \varnothing$ is a witness for every $k$.
+\end{definition}
+
+\begin{definition}[Append-only consistency]
+\label{def:aoc}
+A \emph{certified history} is a sequence $(B_1, \pi_1, r_1), \ldots, (B_n, \pi_n, r_n)$ with $r_0 = \varnothing$ and Algorithm~\ref{alg:stackverify} accepting $(\pi_i, r_{i-1}, r_i, B_i)$ for every $i$. The history is \emph{append-only consistent} if there exist well-formed trees $T_0 = \varepsilon, T_1, \ldots, T_n$ with $\mathsf{dig}(T_i) = r_i$ and
+\[
+\mathsf{map}(T_i) \;=\; \mathsf{map}(T_{i-1}) \uplus B_i \qquad \text{for } i = 1, \ldots, n,
+\]
+where $\uplus$ is disjoint union of partial maps; in particular the keys of $B_i$ are pairwise distinct and absent from $\mathsf{map}(T_{i-1})$.
+\end{definition}
+
+Definition~\ref{def:aoc} is the formal counterpart of Definition~\ref{def:append-only-accumulator}: map monotonicity is clause~1, and Corollaries~\ref{cor:unicity}--\ref{cor:service} below deliver clauses~2 and~3. It subsumes prior-state preservation~\eqref{eq:psp}, with the committed maps $M_i$ of Section~\ref{sec:scope} realized as $\mathsf{map}(T_i)$.
+
+\subsection{Security}
+\label{sec:consistency-theorem}
+
+\begin{lemma}[Digest binding]
+\label{lem:binding}
+From trees $T \neq T'$ with $\mathsf{dig}(T) = \mathsf{dig}(T') \neq \varnothing$, a collision is computable.
+\end{lemma}
+\begin{proof}
+The two digest preimages are equal strings or a collision is found. If equal, the domain-separation tag and the injective fixed-length encodings force the same constructor with equal components: for leaves, $T = T'$, a contradiction; for junctions, equal $(d, p)$ and equal child digests, and since $T \neq T'$ some child pair differs while sharing a digest---recurse into it. The recursion terminates in a collision.
+\end{proof}
+
+\begin{lemma}[Run decomposition]
+\label{lem:run}
+An accepting run of Algorithm~\ref{alg:stackverify} on $(\pi, r_{i-1}, r_i, B)$ determines, in linear time: an ordered binary \emph{proof tree} $P$ with internal nodes the $N(d)$ opcodes and terminals the $S$, $O$, $O_L$, $L$ opcodes, the $L$ terminals consuming the strictly sorted batch left to right; pre- and post-digests for every node of $P$ per the verifier's algebra, with the root pair equal to $(r_{i-1}, r_i)$; a unique \emph{region label} $p$ for every junction, derived from the advice of its children---all advised children yield the same $p$, and at least one child is advised; and a validated advice tuple at every junction--child edge where the child carries advice: the child's depth exceeds the junction's and the child's region extends $p\|\beta$, the advice being $(\kappa, k)$ for $L$ and $O_L$ terminals, the opened $(d', p')$ for $O$ terminals, and the child's own $(d, p)$ label for $N$ children. At every junction whose old side arose from a pass-through or $\varnothing$ case, both children carry advice; consequently, opaque $S$ terminals occur only as children of junctions whose old side was hashed.
+\end{lemma}
+\begin{proof}
+By construction of the algorithm; each clause restates a check or an assignment made during the run.
+\end{proof}
+
+\begin{theorem}[Round soundness]
+\label{thm:round}
+Let $T$ be a well-formed tree (possibly $\varepsilon$) with $\mathsf{dig}(T) = r_{i-1}$, and let Algorithm~\ref{alg:stackverify} accept $(\pi, r_{i-1}, r_i, B)$. Then from $T$, $\pi$, $B$ one can either compute a collision, or construct a well-formed tree $T'$ with $\mathsf{dig}(T') = r_i$ and $\mathsf{map}(T') = \mathsf{map}(T) \uplus B$. If $T$ is canonical, then $T'$ is canonical.
+\end{theorem}
+\begin{proof}
+Let $P$ be the proof tree of Lemma~\ref{lem:run}. Define the \emph{old projection} $P_0$ by structural recursion: $S$, $O$, $O_L$ terminals map to themselves; $L$ maps to nothing; a junction whose old side was hashed (both children's old digests $\neq \varnothing$) maps to a junction over the projections of its children; a pass-through junction maps to the projection of its surviving child; an all-$\varnothing$ junction maps to nothing. By the verifier's algebra, evaluating $P_0$---with $S$ digests and $O$/$O_L$ openings as given---yields $r_{i-1}$.
+
+\emph{Step 1: matching.} If $r_{i-1} = \varnothing$ then $P_0$ is empty (a non-$\varnothing$ old digest propagates to the root through every case of the four-way rule) and $T = \varepsilon$; proceed to Step~2 with no grafts. Otherwise walk $P_0$ and $T$ together from their roots. At an explicit junction of $P_0$ labeled $(d, p)$ with children's old digests $(c_l, c_r)$: the current $T$-node's digest equals $H(\texttt{0x01}\|\langle d\rangle\|\langle p\rangle\| c_l \| c_r)$; if the current $T$-node is a leaf or carries a different label or different child digests, its own preimage differs---a collision; otherwise the labels agree and the walk recurses into both children. At an $O_L(k', v')$ terminal, the current $T$-node must be $\mathsf{Leaf}(k', v')$ by the same argument. At an opaque hole ($S(c)$, or a digest child of an $O$ opening): assign to it the current $T$-subtree, whose digest is $c$. The outcome, barring a collision: every explicit node of $P_0$ coincides in label and position with a node of $T$; every hole is assigned the $T$-subtree at its position; and $T$ is exactly the grafting of $P_0$'s explicit structure with the assigned subtrees.
+
+\emph{Step 2: construction.} Let $T'$ be the grafting of $P$: $N(d) \mapsto \mathsf{Node}(d, p, \cdot, \cdot)$, with $p$ its derived region label; $L$ and $O_L$ terminals $\mapsto$ the corresponding leaves; $O(d', p', \cdot, \cdot) \mapsto \mathsf{Node}(d', p', \cdot, \cdot)$ over its assigned child subtrees; $S(c) \mapsto$ its assigned subtree. Then $\mathsf{dig}(T') = r_i$, because the post-digest algebra agrees with $\mathsf{dig}$ on terminals and junctions.
+
+\emph{Step 3: well-formedness.} Classify the edges of $T'$. Edges inside an assigned subtree satisfy the conditions because $T$ is well-formed. An edge whose child is an opaque $S$ terminal has, by Lemma~\ref{lem:run}, a parent whose old side was hashed; by Step~1 that parent, its labels, and its child digests coincide with a node of $T$, so the edge is an edge of $T$ at the same position, and well-formedness of $T$ applies. Every other edge has an advised child and was checked by the verifier; it remains to note that the validated advice equals the true $(\mathsf{dep}, \mathsf{reg})$ of the child's top node in $T'$: exact for $L$ and $O_L$ children by construction, for $O$ children by Step~1, and for $N$ children by the definition of their derived labels. Hence $T'$ is well-formed.
+
+\emph{Step 4: map.} The terminals of $P$ partition the leaves of $T'$ into leaves of assigned subtrees, $O_L$ leaves, and $L$ leaves. By Step~1 the first two groups are exactly the leaves of $T$; the third is exactly $B$, fully consumed and with pairwise distinct keys. By Lemma~\ref{lem:map} applied to the well-formed $T'$, all leaf keys of $T'$ are distinct, so the keys of $B$ are absent from $\mathsf{map}(T)$, and $\mathsf{map}(T') = \mathsf{map}(T) \uplus B$. (Consequently, no accepting run exists for a batch that re-records a present key: it would produce a well-formed tree with a repeated leaf key, which does not exist.)
+
+\emph{Step 5: canonicity.} Assume $T$ canonical. For an old junction of $T'$, the keys added below it extend its region (well-formedness), so the longest common prefix of the enlarged key set still equals the region. For a new junction $\mathsf{Node}(d, p, l, r)$, the regions of $l$ and $r$ equal the longest common prefixes of their own key sets (by canonicity of assigned subtrees and induction over the new structure) and extend $p\|0$ and $p\|1$ respectively, so the longest common prefix of the union is exactly $p$. Hence every junction of $T'$ is canonical.
+\end{proof}
+
+\begin{theorem}[History soundness]
+\label{thm:history}
+For every certified history (Definition~\ref{def:aoc}), either a collision is computable from its transcript, or the history is append-only consistent, with all $T_i$ canonical.
+\end{theorem}
+\begin{proof}
+Induction on rounds: $T_0 = \varepsilon$ is canonical with $\mathsf{dig}(T_0) = \varnothing$, and Theorem~\ref{thm:round} supplies the step.
+\end{proof}
+
+\begin{corollary}[Unicity]
+\label{cor:unicity}
+From a certified history together with verifying inclusion proofs for $(k, v)$ against $r_i$ and for $(k, v')$ against $r_j$ with $v \neq v'$, a collision is computable.
+\end{corollary}
+\begin{proof}
+By Theorem~\ref{thm:history}, obtain the trees $T_i, T_j$ (or a collision, and we are done). A verifying inclusion proof against $\mathsf{dig}(T)$ matches into $T$ from the root exactly as in Step~1 of Theorem~\ref{thm:round}: each chain element's preimage must agree with the corresponding node of $T$ (else a collision), and the terminal comparison places $\mathsf{Leaf}(k, v)$ in $T$. Hence $v = \mathsf{map}(T_i)(k)$ and $v' = \mathsf{map}(T_j)(k)$; taking $i \le j$, monotonicity ($\mathsf{map}(T_j) \supseteq \mathsf{map}(T_i)$) gives $v' = v$, a contradiction---so a collision was computed along the way.
+\end{proof}
+
+\begin{corollary}[No false non-inclusion]
+\label{cor:noninc}
+From a certified history, a verifying inclusion proof for $(k, v)$ against $r_i$, and a verifying non-inclusion witness for $k$ against $r_j$ with $j \ge i$, a collision is computable.
+\end{corollary}
+\begin{proof}
+As above, $(k, v) \in \mathsf{map}(T_j)$, so $r_j \neq \varnothing$ and $T_j$ contains the leaf of $k$, all of whose ancestors carry regions that are prefixes of $k$. The witness's openings match into $T_j$ (else a collision) and, by construction, follow the descent directed by $k$'s bits through junctions whose regions are prefixes of $k$---which is precisely the path to $k$'s leaf. Its terminal therefore matches a node on that path: every such junction has a region that is a prefix of $k$, and the only leaf on it has key $k$, contradicting the witness's terminal condition in either case.
+\end{proof}
+
+\begin{corollary}[Service completeness]
+\label{cor:service}
+Let $T_i$ be the canonical trees of Theorem~\ref{thm:history}. For every $(k, v) \in \mathsf{map}(T_i)$, the path data of $T_i$ yields a verifying inclusion proof; for every $k \notin \mathrm{dom}(\mathsf{map}(T_i))$, the canonical descent of $T_i$ yields a verifying non-inclusion witness. Producing them requires only possession of the tree data, an availability rather than an integrity concern.
+\end{corollary}
+
+\begin{remark}
+Theorems~\ref{thm:round} and~\ref{thm:history} together with Corollaries~\ref{cor:unicity}--\ref{cor:service} establish that the coherent consistency proof realizes the accumulator interface of Definition~\ref{def:append-only-accumulator}. The proofs are elementary---structural inductions with explicit collision extraction---precisely because the region commitment localizes every invariant to an edge of the touched structure. A machine-checked formalization is planned and should follow the proof structure given here.
+\end{remark}
 
 
 \section{(ZK)-SNARKs}
 
-By using an appropriate cryptographic SNARK system, the size of the non-deletion proof can be reduced to a constant.
+By using an appropriate cryptographic SNARK system, the size of the consistency proof can be reduced to a constant.
 
-The statement to be proven in zero-knowledge is the correct execution of the non-deletion proof verification algorithm described in the previous section. The public inputs to the proof (the instance) are the pre- and post-update roots $(r_{i-1}, r_i)$. The private input (the witness) $\omega$ is the insertion batch $B_i$ and the set of sibling nodes (proof) $\pi_i$. While ZK-SNARKs can hide the witness, this zero-knowledge property is not a requirement for our use case; we are primarily interested in the proof's succinctness.
+The statement to be proven in zero-knowledge is the correct execution of the consistency proof verification algorithm described in the previous section. The public inputs to the proof (the instance) are the pre- and post-update roots $(r_{i-1}, r_i)$. The private input (the witness) $\omega$ is the insertion batch $B_i$ and the set of sibling nodes (proof) $\pi_i$. While ZK-SNARKs can hide the witness, this zero-knowledge property is not a requirement for our use case; we are primarily interested in the proof's succinctness.
 
 In an experiment~\cite{snark}, the statement is implemented as a constraint system $R$ using the CIRCOM domain-specific language. The witness is generated based on $\pi_i$ and $B_i$, and is supplemented by control wires that define how individual hashing blocks in the circuit are connected to the previous layer and to the inputs. If all constraints are satisfied, the proof is valid.
 
@@ -542,7 +740,7 @@ The proving system used is Groth16~\cite{cryptoeprint:2016/260}, which is known 
 When the Consensus Layer verifies these succinct proofs, the Aggregation Layer operates trustlessly. However, certain redundancy is still required to ensure data availability of the SMT itself.
 
 
-\section{Circuit-Based SNARK Definition}
+\subsection{Circuit-Based SNARK Definition}
 
 Due to the limited expressivity of an arithmetic circuit (e.g., no data-dependent loops or real branching), the entire computation flow must be fixed at circuit-creation time. It is therefore helpful to pre-process the inputs to create a fixed execution trace.
 
@@ -600,16 +798,16 @@ The MUXes for internal layers are connected to a vector containing:
 
 Both halves' MUXes are controlled by the same wiring signal.
 
-\subsection{Performance Indication}
+\subsubsection{Performance Indication}
 
-Initial benchmarks on a consumer laptop (Apple M1) using the Poseidon hash function indicate a proving throughput of up to $25$ transactions per second.
+Initial benchmarks on a consumer laptop (Apple M1) using the Poseidon hash function indicate a proving throughput of up to $25$ transactions per second; achievable with large batch sizes. Both the fixed circuit size, the parameters of key setup ceremony, and available prover memory present hard limits to the batch size.
 
 
-\section{Execution Trace-Based STARK}
+\subsection{Execution Trace-Based STARK}
 
-An alternative to a bespoke arithmetic circuit is to use a general-purpose zero-knowledge virtual machine (zkVM). In this approach, the verification logic is written as a traditional imperative program (e.g., in Rust). The zkVM then generates a proof of correct execution for that program.
+An alternative to a low-level arithmetic circuit is to use a general-purpose zero-knowledge virtual machine (zkVM). In this approach, the verification logic is written as a traditional imperative program (e.g., in Rust). The zkVM then generates a proof of correct execution for that program.
 
-We have implemented the non-deletion proof verification algorithm as a Rust program~\cite{stark} to be proved by the SP1 zkVM~\cite{sp1}. As a commitment to the ``right'' program we use a prover key, generated during program setup. Its contents are: a commitment to the preprocessed traces, the starting Program Counter register, the starting global digest of the program, after incorporating the initial memory; the chip information, the chip ordering; and prover configuration.
+We have implemented the consistency proof verification algorithm as a Rust program~\cite{stark} to be proved by the SP1 zkVM~\cite{sp1}. As a commitment to the ``right'' program we use a prover key, generated during program setup. Its contents are: a commitment to the preprocessed traces, the starting Program Counter register, the starting global digest of the program, after incorporating the initial memory; the chip information, the chip ordering; and prover configuration.
 
 For verification, we obtain the prover key hash and authenticate it off-band.
 
@@ -619,7 +817,7 @@ After verifying the proof (\lstinline|client.verify(&proof, &vk)|), we can be su
 
 The privacy of the witness (the zero-knowledge property) is not a requirement for this application. The primary goal is to achieve computational integrity and succinctness. Therefore, while the underlying technology is often referred to as ``ZK'', we are using it as a Scalable Transparent ARgument of Knowledge (STARK).
 
-\subsection{zkVM Performance}
+\subsubsection{zkVM Performance}
 
 On a 10-core Apple M1 CPU, proving a 500-transaction batch using SHA-256 within the SP1 zkVM takes approximately 5 minutes. However, the SP1 framework is robust and designed for scalability, supporting distributed prover networks, industrial-grade GPUs, proof chunking and recursion, and other advanced features to tackle larger problems with brute force.
 
@@ -630,10 +828,10 @@ The ZK proving performance is dominated by the cryptographic hashing primitive u
 
 At the time of writing, the SP1 zkVM\footnote{\url{https://docs.succinct.xyz/docs/sp1/introduction}} offers precompiles for standard hash functions like SHA-256, which accelerates their execution compared to a direct RISC-V implementation. The use of these precompiles (also known as coprocessors or chips) can be observed in the prover's output, which details the number of calls to each specialized circuit (e.g., \lstinline|SHA_EXTEND|, \lstinline|SHA_COMPRESS|). However, even with acceleration, proving SHA-256 is computationally expensive.
 
-A possible optimization is to use ``ZK-friendly'' hash functions. These functions are highly efficient when implemented directly in arithmetic circuits, where there is direct access to the native field elements. Their performance advantage in a RISC-V zkVM is more nuanced, as there is an overhead in translating between the VM's 32-bit integer registers and the underlying finite field elements as used by the prover. Operations like range-checking, which are necessary to prevent overflows, are expensive in ZK. There are attempts to create precompiles for ZK-friendly hash functions\footnote{\url{https://github.com/Okm165/sp1-poseidon2/pull/8}}, with limited real-world effect.
+A possible optimization is to use ``ZK-friendly'' hash functions. These functions are highly efficient when implemented directly in arithmetic circuits, where there is direct access to the native field elements. Their performance advantage in a RISC-V zkVM is more nuanced, as there is an overhead in translating between the VM's 32-bit integer registers and the underlying finite field elements as used by the prover. Operations like range-checking, which are necessary to prevent overflows, are expensive in ZK.
 
 
-\subsection{More on ZK and Hash Functions}
+\subsubsection{More on ZK and Hash Functions}
 
 Standardized cryptographic hash algorithms like SHA-2 were optimized mostly for minimal physical chip area, a design choice driven by NIST. Others, like the Blake family, were designed for fast execution on CPUs. They all include numerous bitwise operations (e.g., rotations, XOR) that are silicon logic-native but are notoriously inefficient to prove in ZK. Proving such operations is expensive, because a full field element (e.g., a 254-bit value on the BN254 curve) must be used to represent a single bit.\footnote{See e.g. \url{https://github.com/iden3/circomlib/blob/master/circuits/sha256/sha256.circom}} ZK provers are most efficient with arithmetic operations native to the underlying finite field, such as addition and multiplication (and lookups on some ZK stacks). Other operations must be implemented indirectly.
 
@@ -642,7 +840,7 @@ There are some newer cryptographic hash functions specifically designed for ZK e
 A key advantage of these hashes is that they operate directly on field elements, avoiding the costly translation from integer representations. The security level is defined by the underlying field and instantiation parameters. While some VMs, like the Cairo VM used by Starknet, provide direct access to field elements, they are often highly specialized for particular use cases, such as L2 rollups.
 
 
-\subsection{Performance Roadmap}
+\subsubsection{Performance Roadmap}
 
 The overall approach of the zkVM path is sound: the proving time depends on the size of the addition batch, and notably, it does not have linear relationship to the total capacity of the data structure. The verification algorithm is tight. The performance bottleneck is, as discussed, the cost of arithmetizing a general-purpose execution trace that includes integer-to-field translations for every bitwise operation in the hash function.
 
@@ -657,11 +855,11 @@ We implemented the consistency-proof verification logic as a Plonky3 AIR over th
 
 \subsection{Underlying Tree Variant}
 
-The implementation proves consistency for a path-compressed Patricia trie over 256-bit keys, which we call RSMT3 (radix sparse Merkle tree, third iteration). RSMT3 has three node kinds: leaves (which hash key and value together via an additive Poseidon2 sponge), internal junctions (each is the unique point where two non-empty subtrees diverge; the junction hash includes the bifurcation depth so that subtrees cannot be silently re-attached at a different level), and empty subtrees (denoted by a canonical zero digest). Path compression eliminates single-child chains, drastically reducing the number of hash evaluations relative to a depth-256 indexed SMT, while preserving the standard SMT property that the key uniquely determines the leaf position. As established in Section~\ref{sec:scope}, the in-circuit statement does not need to enforce the canonical-shape rules of RSMT3---it only needs to enforce prior-state preservation.
+The implementation proves consistency for a path-compressed Patricia trie over 256-bit keys, which we call RSMT6 (radix sparse Merkle tree, sixth iteration). RSMT6 has three node kinds: leaves (which hash key and value together via an additive Poseidon2 sponge), internal junctions (each is the unique point where two non-empty subtrees diverge; the junction hash includes the bifurcation depth so that subtrees cannot be silently re-attached at a different level), and empty subtrees (denoted by a canonical zero digest). Path compression eliminates single-child chains, drastically reducing the number of hash evaluations relative to a depth-256 indexed SMT, while preserving the standard SMT property that the key uniquely determines the leaf position. As established in Sections~\ref{sec:scope} and~\ref{sec:critical-review}, the in-circuit statement must enforce append-only consistency (Definition~\ref{def:aoc}); the circuit described in this section implements its structural core (prior-state preservation), with the edge-coherence constraint family of Section~\ref{sec:stack-verifier} as a specified extension.
 
 \subsection{From Stack Verifier to AIR Arithmetization}
 
-The consistency proof is the flat post-order opcode stream over the alphabet $\{S(h), L, N(d)\}$ described in Section~\ref{sec:stack-verifier}, and the AIR is the arithmetization of the stack-machine verifier of Algorithm~\ref{alg:stackverify}: one execution of the verifier becomes one trace, and verification accepts iff the final stack is exactly $(r_{i-1}, r_i)$. The four-way pre-state rule on $N(d)$ is the only branching primitive of the machine, which keeps the constraint system small.
+The consistency proof is the flat post-order opcode stream of Section~\ref{sec:stack-verifier}, and the AIR is the arithmetization of the stack machine of Algorithm~\ref{alg:stackverify}: one execution of the verifier becomes one trace, and verification accepts iff the final stack is exactly $(r_{i-1}, r_i)$. The implemented circuit covers the structural fragment of the statement---opcodes $S$, $L$, $N$ and the four-way digest algebra over the depth-only junction hash---whose pre-state rule is the machine's only branching primitive, keeping the constraint system small. Extending the trace with the region limbs, the openings, and the edge-coherence constraint family follows the same arithmetization pattern; the cost estimate is given in Section~\ref{sec:stack-verifier}.
 
 \subsection{AIR Tables}
 
@@ -798,7 +996,7 @@ The aggregate statement $\mathcal{A}_n$ is then: \emph{starting from the genesis
 \[ \mathsf{pv}_n = (\alpha,\, g,\, n,\, R_n,\, D_n). \]
 Everything else---shard roots, per-round proofs, MMR witnesses---is private witness data, so the proof and its statement have constant size regardless of $n$ and of the number of shards.
 
-Note what is deliberately absent from the statement: signatures. The aggregate proof does not verify the committee's quorum signatures, because the truth of $\mathcal{A}_n$ does not depend on \emph{who} certified the transitions; consistency is a property of the data itself. The link to the certified reality is made by the verifier, outside the proof, by checking that the roots it cares about coincide with Unicity Certificates validated against the Trust Base (Section~\ref{sec:maxi-validation}). Folding signature verification into the circuit is possible but adds cost without adding security: it still could not prevent a quorum from signing two divergent histories, which remains the only residual attack (Section~\ref{sec:residual-trust}).
+Note that validator signatures are absent from the statement. The aggregate proof does not verify the committee's quorum signatures, because the truth of $\mathcal{A}_n$ does not depend on \emph{who} certified the transitions; consistency is a property of the data itself. The link to the certified reality is made by the verifier, outside the proof, by checking that the roots it cares about coincide with Unicity Certificates validated against the Trust Base (Section~\ref{sec:maxi-validation}). Folding signature verification into the circuit is possible but adds cost without adding security: it still could not prevent a quorum from signing two divergent histories, which remains the only residual attack (Section~\ref{sec:residual-trust}).
 
 \subsection{Recursive Aggregation}
 
@@ -866,7 +1064,7 @@ If the user ever encounters two verifying checkpoints, or a verifying checkpoint
 The procedure above makes the reduction of assumptions precise. Under collision resistance of the hash function and soundness of the two proof systems (the shard STARKs and the aggregation zkVM), the following hold \emph{unconditionally}, with no assumption about the validator set:
 
 \begin{enumerate}[nosep]
-  \item every round transition in the proven history preserved prior state~\eqref{eq:psp}---no recorded token state was ever deleted or modified, hence no double-spend is representable within that history; and
+  \item every round transition in the proven history satisfied append-only consistency (Definition~\ref{def:aoc}, Theorem~\ref{thm:history})---no recorded token state was ever deleted, modified, or re-recorded, hence no double-spend is representable within that history; and
   \item the proven history is linear: each round extends its predecessor, and $D_n$ commits to the unique sequence of global roots.
 \end{enumerate}
 
@@ -878,9 +1076,9 @@ Zero-knowledge proof systems offer a powerful method for creating succinct proof
 
 Different proof systems offer different trade-offs. The relevant properties are proving effort, necessity (and generality) of trusted setup, interactivity, recursion-friendliness, and the maturity and trustworthiness of available tooling. STARKs are comparatively fast to prove but have larger proofs, and avoid undesirable properties such as trusted setup. Groth16 SNARKs produce small proofs but require more proving effort and a circuit-specific trusted setup. For more complex applications, hybrid approaches and proof recursion can be employed. Figure~\ref{fig:comp} illustrates the proof size trade-off.
 
-A second axis of optimization is the scope of the in-circuit statement itself. The scoping argument of Section~\ref{sec:scope}---only \emph{prior-state preservation} needs cryptographic enforcement, with the remaining SMT properties self-policed by the protocol around the public root, since their violation amounts to self-inflicted denial of service by a replaceable component---turns a verification problem that naively would require encoding the full canonical tree-construction rules into one with a tight, hand-built AIR. The result is the measured order-of-magnitude proving-throughput advantage of the Plonky3 AIR over zkVM-based approaches reported in Section~\ref{sec:measured}: a single Aggregator on a single CPU sustainably exceeds $10\,000$ insertions per second with a 1.7\,MB transparent proof and tens of milliseconds verification time. This shows that operating a very large-scale Aggregation Layer in a trustless manner is economically feasible today, with no GPU farm or trusted setup, and on a power budget compatible with commodity hardware.
+A second axis of optimization is the scope of the in-circuit statement itself. Drawing that scope correctly requires care: the seemingly sufficient structure-only statement admits a concrete cross-round equivocation attack (Section~\ref{sec:critical-review}). The right kernel---\emph{append-only consistency}, i.e., prior-state preservation plus coherent placement of insertions, made locally checkable by the region-committing node hash---is proved sufficient in Theorem~\ref{thm:history}, while completeness and service properties remain self-policed by the protocol around the public root. This still turns a verification problem that naively would require reconstructing the full canonical tree-construction rules into one with a tight, hand-built AIR. The result is the measured order-of-magnitude proving-throughput advantage of the Plonky3 AIR over zkVM-based approaches reported in Section~\ref{sec:measured}: a single Aggregator on a single CPU sustainably exceeds $10\,000$ insertions per second with a 1.7\,MB transparent proof and tens of milliseconds verification time. This shows that operating a very large-scale Aggregation Layer in a trustless manner is economically feasible today, with no GPU farm or trusted setup, and on a power budget compatible with commodity hardware.
 
-Above the per-round proofs sits the aggregation mechanism of Section~\ref{sec:aggregation-audit}: the consistency proofs of all shards and the Consensus Layer's own state transitions are folded, by recursion on a zkVM, into a single fixed-size transparent proof of the correctness of the system's entire operating history. The two validation paths complement each other. The pragmatic path, anchored in the Unicity Trust Base, delivers finality within seconds under an accountable honest-majority-of-stake assumption; the audit path, available with a delay of minutes to hours, retrospectively removes that assumption, leaving stake with only the roles of liveness and tip uniqueness. A formal, machine-checked correctness proof of the consistency-proof mechanism (Algorithm~\ref{alg:stackverify} enforcing prior-state preservation) is the natural next step; this paper fixes the model and the algorithms that such a proof will target.
+Above the per-round proofs sits the aggregation mechanism of Section~\ref{sec:aggregation-audit}: the consistency proofs of all shards and the Consensus Layer's own state transitions are folded, by recursion on a zkVM, into a single fixed-size transparent proof of the correctness of the system's entire operating history. The two validation paths complement each other. The pragmatic path, anchored in the Unicity Trust Base, delivers finality within seconds under an accountable honest-majority-of-stake assumption; the audit path, available with a delay of minutes to hours, retrospectively removes that assumption, leaving stake with only the roles of liveness and tip uniqueness. The consistency-proof mechanism now carries a formal correctness proof (Theorem~\ref{thm:history} and its corollaries): append-only consistency of the entire certified history reduces to the collision resistance of the underlying hash function. A machine-checked formalization of this proof is the natural next step.
 
 \begin{figure}[!htbp]
     \centering

@@ -85,7 +85,7 @@ To scale further, we use cryptographic zero-knowledge proofs (ZKPs) to compress 
 
 A useful scoping observation is that the consensus-relevant statement is narrower than ``the SMT was updated correctly''. The Consensus Layer needs to be convinced that \emph{no previously-recorded leaf was deleted or modified} and that \emph{every new leaf is placed coherently with its key}; Remark~\ref{rem:placement} shows, by a concrete attack, that the second half cannot be dropped. Request liveness, submitted-request accountability, and exclusion of unauthorized inserts are self-policed by the protocol layer around the public root commitment: their violation only damages the dishonest aggregator's own ability to serve users, a denial of service by an operationally replaceable component. Section~\ref{sec:scope} details this scoping argument, and Section~\ref{sec:consistency-formal} proves that the resulting statement is sufficient. The narrowness of the in-circuit statement is what makes the AIR small and the proving cheap.
 
-In this paper, we show how to scale the Aggregation Layer to $10\,000$ tx/s \emph{per shard} and beyond. This figure was the original design target; the measured proving throughput of our reference implementation exceeds it by roughly $3\times$ on a single consumer-class CPU (Section~\ref{sec:custom-air-circuit}). Due to the small proof size and efficient verification, the Consensus Layer can support a practically unlimited number of such trustless shards.
+In this paper, we show how to scale the Aggregation Layer to $10\,000$ tx/s \emph{per shard} and beyond. This figure was the original design target; the measured proving throughput of our reference implementation exceeds it by roughly $3\times$ on a single consumer-class CPU (Section~\ref{sec:custom-air-circuit}). Shards process disjoint key ranges and prove their state transitions independently, so aggregate transaction capacity is the sum of their capacities. The BFT Core receives one succinct transition proof per advancing shard rather than one item per transaction; Section~\ref{sec:sharding-architecture} makes this scaling boundary precise.
 
 
 \section{State of the Art and Comparison}
@@ -138,7 +138,7 @@ To prevent double-spending of tokens, the Unicity Infrastructure permanently\foo
 
 The rest of the processing---executing transactions, running smart contracts, etc.---can happen at the client layer, executed by users or ``agents''. Agents are themselves the interested parties in data availability and transaction validation, and they choose the ordering of incoming messages for processing. Thus, the Unicity Infrastructure is relieved of these duties, removing a major scaling bottleneck of traditional L1 blockchains.
 
-The Unicity Infrastructure operates in a trust-minimized way by utilizing distributed authenticated data structures and cryptographic zero-knowledge tools (SNARKs) for extra succinctness of messages and tokens. The Proof of Unicity is a fresh \emph{proof of inclusion} of the token state being spent. This can be efficiently generated based on a Merkle Tree data structure. The proof size is logarithmic with respect to the tree's capacity, making it highly efficient. If the root of the tree is securely fixed, the integrity of the rest of the tree can be verified trustlessly: it is computationally infeasible to generate a valid inclusion proof for an element not present in the tree, without changing the root, or breaking underlying cryptographic assumptions. The infrastructure also supports \textit{non-inclusion proofs}, making it possible to prove to other parties that a particular token state has not yet been spent. The Unicity Infrastructure can thus be conceptualized as a large-scale, distributed Sparse Merkle Tree (SMT). Specifically, the tree is implemented as a path-compressed radix variant, the RSMT (Section~\ref{sec:stack-verifier}), which eliminates single-child internal chains while preserving the standard property that the key uniquely determines the leaf position. Furthermore, an SMT is straightforward to shard: the tree is partitionable vertically into slices. Leaves remain at their deterministically computed positions, as an SMT is an indexed data structure. Each leaf's identifier encodes its address in the tree, and the leaf's shard address is a prefix of the identifier.
+The Unicity Infrastructure operates in a trust-minimized way by utilizing distributed authenticated data structures and succinct cryptographic proofs. The Proof of Unicity is a fresh \emph{proof of inclusion} of the token state being spent. This can be efficiently generated based on a Merkle Tree data structure. The proof size is logarithmic with respect to the tree's capacity, making it highly efficient. If the root of the tree is securely fixed, the integrity of the rest of the tree can be verified trustlessly: it is computationally infeasible to generate a valid inclusion proof for an element not present in the tree, without changing the root, or breaking underlying cryptographic assumptions. The infrastructure also supports \textit{non-inclusion proofs}, making it possible to prove to other parties that a particular token state has not yet been spent. The Unicity Infrastructure can thus be conceptualized as a large-scale, distributed Sparse Merkle Tree (SMT). Specifically, the tree is implemented as a path-compressed radix variant, the RSMT (Section~\ref{sec:stack-verifier}), which eliminates single-child internal chains while preserving the standard property that the key uniquely determines the leaf position. Its key-determined layout also gives a canonical horizontal partition: the prefix of an identifier selects exactly one shard, while the remaining bits locate the identifier within that shard (Section~\ref{sec:sharding-architecture}).
 
 Aggregation Layer connects to the Consensus Layer. For fully trustless operation, each request is accompanied by a cryptographic proof of SMT consistency.
 
@@ -159,26 +159,14 @@ Aggregation Layer connects to the Consensus Layer. For fully trustless operation
 \subsection{Consensus Layer}
 \label{sec:consensus-layer}
 
-The Consensus Layer consists of a single logical component, the \emph{BFT Core}: a bounded-size committee of validator nodes running a leader-based Byzantine fault tolerant (BFT) consensus protocol. Its interface is narrow. Once per round, it receives the certification requests of the Aggregation Layer shards, checks that each request uniquely extends the previously certified state of its shard, verifies the accompanying consistency proof, and issues a \emph{Unicity Certificate} over the updated global state. BFT consensus provides deterministic, single-round finality and a fast, predictable round rate; the price is that liveness depends on a supermajority (more than two thirds of voting power) of the committee being online and cooperative.
+The Consensus Layer consists of a single logical component, the \emph{BFT Core}: a bounded-size committee of validator nodes running a Byzantine fault tolerant (BFT) consensus protocol. During a round of execution, it receives certification requests from Aggregation Layer shards, checks that each request extends the previously certified state of its shard, verifies the accompanying consistency proof, and issues a \emph{Unicity Certificate} over the updated global state. BFT consensus provides deterministic finality; its usual quorum assumption is needed for prompt progress and for uniqueness of the most recent certified tip.
 
-The BFT Core maintains no blockchain. Its persistent state is cumulative: the vector of most recently certified shard roots (combined into a single global root, Section~\ref{sec:data-flow}), the staking registry described below, and the \emph{Unicity Trust Base}---a chain of epoch records, one per validator-set change, each carrying the new validator identities, their stake weights and the quorum condition, and each signed by a quorum of the previous epoch's committee. There is no block content worth chaining: ordering and availability of user transactions are handled below, at the Aggregation and Execution Layers, and issued certificates are persisted by the parties who need them---embedded in tokens as proofs, and stored in the public round archive (Section~\ref{sec:data-availability}).
+The BFT Core maintains no blockchain. Its persistent protocol state is cumulative: the vector of most recently certified shard roots (combined into a single global root, Section~\ref{sec:data-flow}) and the \emph{Unicity Trust Base}, an authenticated record of the validator set and quorum rule applicable to each configuration period. There are no transaction blocks: ordering and availability of user requests are handled below, at the Aggregation and Execution Layers, and issued certificates are persisted by the parties who need them and by the public round archive (Section~\ref{sec:data-availability}).
 
-\subsubsection{Delegated Proof of Stake}
-\label{sec:dpos}
-
-Permissionless participation in the Consensus Layer is achieved through delegated Proof of Stake (DPoS), using the native token. We specify the mechanism here; the economic parameters---emission schedule, commission bounds, minimum stakes, penalty fractions---are governance-controlled and documented separately.
-
-\begin{description}[nosep]
-  \item[Staking and delegation.] Any token holder may bond tokens, either as a \emph{validator candidate}, operating a node and publishing its consensus public key and service addresses, or as a \emph{delegator}, assigning bonded tokens to candidates of their choice. Bonded tokens are locked and earn yield (see \emph{Rewards}); unbonding is subject to a fixed delay (see below). Newly minted tokens---including validator and delegator rewards themselves---can be bonded directly, so that earned rewards compound.
-  \item[Validator election.] Committees serve for fixed \emph{epochs}. At each epoch boundary, candidates are ranked by total bonded stake (own plus delegated), and the top $k$ form the next committee---a stake-weighted ``beauty contest'' in which delegators continuously vote with their stake, and candidates compete on reliability, performance, and commission. The election is a deterministic function of the staking registry, which is itself part of the certified cumulative state, so anyone can recompute and verify the committee of any epoch. Voting power within the committee is proportional to bonded stake, and each epoch's validator set and quorum condition are recorded in the corresponding Trust Base entry.
-  \item[Rewards.] Validators and their delegators earn a protocol-defined emission per epoch, plus any protocol fees collected during the epoch, distributed pro rata to bonded stake; the validator retains a self-declared commission. Reward distribution is part of the certified state transition at the epoch boundary.
-  \item[Slashing and accountability.] Safety violations of a BFT protocol are \emph{attributable}: certifying two conflicting states in the same round (equivocation) requires the same key to sign two conflicting payloads, and the signature pair is self-contained cryptographic evidence, verifiable by anyone. Any party may submit such evidence; the offending validator's bonded stake---including delegations, which keeps delegators diligent in their choice of candidate---is partially destroyed, with a fraction paid to the submitter. Prolonged unavailability is handled more mildly, by withheld rewards and eviction from the committee. This is the accountable-safety approach of modern PoS finality systems~\cite{casper}.
-  \item[Unbonding delay.] Unbonding takes effect only after a delay covering at least one full epoch plus the evidence-submission window. The delay guarantees that misbehaving stake is still bonded when evidence against it arrives, and it bounds long-range attacks: a fully unbonded former committee cannot retroactively certify an alternative history without its equivocation being visible next to the original. The residual long-range risk is addressed by the weak-subjectivity anchor that the Trust Base chain provides and, more fundamentally, by the aggregated history proof of Section~\ref{sec:aggregation-audit}.
-\end{description}
-
-The classical ``nothing at stake'' objection to PoS does not apply in its usual form, because there is no chain to fork: each round, the BFT Core certifies exactly one successor state or none. Its analogue---a quorum signing two conflicting successor states---is the equivocation case above: it cannot be prevented cryptographically, but it is detectable, attributable, and economically punished. Section~\ref{sec:aggregation-audit} shows that this is also the \emph{only} residual role of economic assumptions in the security argument; the correctness of all certified state transitions is verifiable from cryptographic assumptions alone.
+Committee formation and its operational policy are orthogonal to the Aggregation Layer and outside the scope of this paper. For the immediate validation path we assume an authenticated Trust Base and a non-equivocating BFT quorum. Section~\ref{sec:aggregation-audit} then shows how recursive proof aggregation removes the quorum from the correctness argument for the recorded history; equivocation between otherwise valid tips remains detectable from conflicting signed artifacts.
 
 \subsection{Aggregation Layer}
+\label{sec:sharding-architecture}
 
 The Aggregation Layer implements a global, append-only key-value store that immutably records every spent token state. More specifically, it provides the following services: 1) recording of key-value tuples where the key identifies a token state and value is recording some meta-data, 2) returning inclusion proofs of keys, 3) returning non-inclusion proofs of keys not present in the store.
 
@@ -186,23 +174,73 @@ The Aggregation Layer periodically has its state authenticator certified by the 
 
 \begin{figure*}[!t]
     \centering
-    \includegraphics[width=.7\textwidth]{pic/layers}
-    \caption{Sharded architecture of the Aggregation Layer.}\label{fig:sharding}
+    \begin{tikzpicture}[
+        font=\small,
+        corebox/.style={rectangle, rounded corners=2pt, draw,
+            align=center, minimum width=14.8cm, minimum height=1.25cm},
+        shardbox/.style={rectangle, rounded corners=2pt, draw,
+            align=center, minimum width=3.1cm, minimum height=1.65cm},
+        certflow/.style={<->, >={Latex[length=2mm]}, thick}
+    ]
+        \node[corebox] (core) at (0,2.0) {\textbf{BFT Core}\\
+            certifies shard-root transitions and commits $c_i=H(\mathcal{SH}_i)$ and
+            $R_i=\mathsf{MerkleRoot}\bigl(\{r_{i,\sigma}\}_{\sigma\in\mathcal{SH}_i}\bigr)$};
+
+        \node[shardbox] (s00) at (-5.4,-0.4) {\textbf{Aggregation shard}\\
+            $\sigma=00$, keys $00\ldots$\\RSMT root $r_{i,00}$};
+        \node[shardbox] (s01) at (-1.8,-0.4) {\textbf{Aggregation shard}\\
+            $\sigma=01$, keys $01\ldots$\\RSMT root $r_{i,01}$};
+        \node[shardbox] (s10) at (1.8,-0.4) {\textbf{Aggregation shard}\\
+            $\sigma=10$, keys $10\ldots$\\RSMT root $r_{i,10}$};
+        \node[shardbox] (s11) at (5.4,-0.4) {\textbf{Aggregation shard}\\
+            $\sigma=11$, keys $11\ldots$\\RSMT root $r_{i,11}$};
+
+        \draw[certflow] (s00.north) -- (s00.north |- core.south);
+        \draw[certflow] (s01.north) -- (s01.north |- core.south);
+        \draw[certflow] (s10.north) -- (s10.north |- core.south);
+        \draw[certflow] (s11.north) -- (s11.north |- core.south);
+
+        \node[font=\scriptsize, align=center, fill=white, inner sep=1.5pt]
+            at (0,0.82) {root transition + consistency proof $\uparrow$\qquad
+                         Unicity Certificate $\downarrow$};
+    \end{tikzpicture}
+    \caption{Aggregation shards beneath one logical BFT Core. The four equal prefixes are illustrative.}\label{fig:sharding}
 \end{figure*}
 
-The Aggregation layer is sharded based on keyspace slices and can be made hierarchical, as shown in Figure~\ref{fig:sharding}.
+\paragraph{Deterministic keyspace partition.}
+Let keys be $\kappa$-bit strings and let the sharding scheme $\mathcal{SH}\subseteq\{0,1\}^{*}$ be prefix-free and exhaustive: no shard identifier is a prefix of another, and every $\kappa$-bit key has a prefix in $\mathcal{SH}$. It induces the total routing function
+\[
+    f_{\mathcal{SH}}(k)=\text{the unique }\sigma\in\mathcal{SH}
+    \text{ such that }\sigma\preceq k.
+\]
+(where $\preceq k$ denotes that bit-string $\sigma$ is a prefix of bit-string $k$).
+Shard $\sigma$ maintains an independent RSMT $T_\sigma$ containing exactly the bindings whose keys satisfy $f_{\mathcal{SH}}(k)=\sigma$. Routing therefore depends only on public key bits: it needs neither a directory lookup nor cross-shard execution, and two requests addressed to different prefixes can be batched, inserted, and proved concurrently.
 
-\emph{Consistency proof}: Once a key is set, it has to remain there forever. Every state change of the Aggregation Layer (or a slice thereof) is accompanied by a cryptographic proof establishing that pre-existing keys have not been removed or their values altered, and that new keys were added at the positions determined by the keys themselves. (In earlier documents this artifact is also called a \emph{non-deletion proof}; we use \emph{consistency proof} throughout.) The size of this proof is logarithmic with respect to the tree's capacity and linear with respect to the size of the inclusion batch. This can be reduced to a constant size using a SNARK. Assuming correct validation of the consistency proof and chaining of the Aggregation Layer's state roots by the Consensus Layer, the Aggregation Layer can be considered trustless.
+\paragraph{Authentication across shards.}
+In each BFT Core round, the latest root of every shard is a leaf of a Merkle \emph{shard-root tree}; a shard that does not advance retains its previous root. The tree root $R_i$ commits to the entire Aggregation Layer state, while $c_i=H(\mathcal{SH}_i)$ binds its active prefix partition. A Unicity Certificate for shard $\sigma$ authenticates $c_i$, authenticates $r_{i,\sigma}$ to $R_i$ with the sibling hashes on the prefix path, and authenticates $R_i$ with the BFT Core's quorum certificate. Consequently, an inclusion or non-inclusion proof has two independent parts: a local RSMT path within $T_\sigma$, and a short shard-root path to $R_i$. Neither part grows with transaction throughput; the latter contains $|\sigma|$ sibling hashes.
+
+\paragraph{Dynamic shard splitting.}
+A busy shard can be split by replacing one prefix $\sigma$ in $\mathcal{SH}$ with the two children $\sigma\|0$ and $\sigma\|1$. The children retain the parent leaves selected by the next key bit. Because RSMT leaves commit to full keys and internal nodes commit to absolute bifurcation depths and key regions (Section~\ref{sec:stack-verifier}), each child root is either the hash of an existing parent subtree or the canonical empty root; retained nodes need not be rehashed and the certified history need not be replayed. The split is activated as a configuration change, after which both children evolve and prove independently. A local RSMT certificate may lose the junction at the split depth while its shard-root certificate gains one sibling hash, moving authentication work from the shard-local tree to the common root without introducing another aggregation tier.
+
+\paragraph{Horizontal capacity and proof aggregation.}
+If shard $\sigma$ sustains insertion rate $q_\sigma$, the Aggregation Layer sustains
+\[
+    Q=\sum_{\sigma\in\mathcal{SH}} q_\sigma
+\]
+subject to the BFT Core's capacity for shard summaries. A shard round containing thousands of insertions exports only $(r_{i-1,\sigma},r_{i,\sigma},\pi_{i,\sigma})$, where the succinct consistency proof $\pi_{i,\sigma}$ has verifier cost independent of the number of stored leaves and is verified independently of other shards. Thus, adding a shard adds storage, batching, and proving capacity without increasing any existing shard's workload; the Core's work grows with the number of advancing shards, not with $Q$. These verifications are mutually independent and can be parallelized. The off-critical-path construction of Section~\ref{sec:aggregation-audit} subsequently folds all changed-shard proofs and the corresponding $R_i$ transitions into one recursively updated proof whose public statement remains fixed-size regardless of the number of shards or elapsed rounds.
+
+\paragraph{Per-shard consistency.}
+Once a key is set, it must remain there permanently. Every shard transition is therefore accompanied by a cryptographic proof that pre-existing keys were neither removed nor modified and that new keys were placed at the positions determined by the keys themselves. The direct hash-based witness grows with the insertion batch, whereas the STARK construction of Section~\ref{sec:custom-air-circuit} makes the public statement just the old and new shard roots and gives succinct verification independent of the batch size. Correct verification and BFT chaining of those roots make each shard an untrusted, cryptographically checked service.
 
 
 \subsection{Execution Layer}
 
-The Execution Layer, also known as the Agent Layer, is responsible for executing transactions and other business logic, using the services of the Aggregation Layer and Unicity in general.
+The Execution Layer is responsible for executing transactions and other business logic, using the services of the Aggregation Layer and Unicity in general. Its formal security model---including double-spending resistance, non-blocking, and service- and user-side privacy---is developed in~\cite{exemodel}. Programmable ownership predicates extend this model with off-chain smart-contract functionality~\cite{predicates}.
 
 \subsection{Data Flow}
 \label{sec:data-flow}
 
-Figure~\ref{fig:dataflow} summarizes the flow of authenticated data through the system, from the shards to the auditing verifier. In each round $i$, every shard $\sigma$ submits a certification request carrying its previous root $r_{i-1,\sigma}$, its new root $r_{i,\sigma}$, and the consistency proof $\pi_{i,\sigma}$. The BFT Core verifies each proof, combines the shard roots into a global root $R_i$ (the root of a small, fixed-shape Merkle tree over the shard roots), reaches consensus, and returns Unicity Certificates to the shards. Since the BFT Core keeps no blockchain, the per-round artifacts---shard roots, consistency proofs, certificates, and Trust Base entries---are published to the public round archive (Section~\ref{sec:data-availability}). From the archive, an aggregation prover folds the history into a single constant-size proof $\Pi_n$ (Section~\ref{sec:aggregation-audit}), which any party can verify against the genesis configuration.
+Figure~\ref{fig:dataflow} summarizes the flow of authenticated data through the system, from the shards to the auditing verifier. In BFT Core round $i$, each shard $\sigma$ that advances submits a certification request carrying its previous root $r_{i-1,\sigma}$, its new root $r_{i,\sigma}$, and the consistency proof $\pi_{i,\sigma}$; roots of non-advancing shards are carried forward. The BFT Core verifies the submitted proofs, combines the current shard roots into the global root $R_i$, reaches consensus, and returns Unicity Certificates to the advancing shards. Since the BFT Core keeps no blockchain, the per-round artifacts---shard roots, consistency proofs, certificates, and Trust Base entries---are published to the public round archive (Section~\ref{sec:data-availability}). From the archive, an aggregation prover folds the history into a single constant-size proof $\Pi_n$ (Section~\ref{sec:aggregation-audit}), which any party can verify against the genesis configuration.
 
 \begin{figure}[!htbp]
     \centering
@@ -210,8 +248,8 @@ Figure~\ref{fig:dataflow} summarizes the flow of authenticated data through the 
   dfbox/.style={rectangle, draw, align=center, minimum height=2.2em, minimum width=5.6cm}]
   \node[dfbox] (verifier) {Auditing user};
   \node[dfbox, below=0.7cm of verifier] (prover) {Aggregation prover (permissionless)};
-  \node[dfbox, below=0.7cm of prover] (arch) {Public round archive\\ {\scriptsize $\{(r_{i-1,\sigma}, r_{i,\sigma}, \pi_{i,\sigma})\}_\sigma$, $R_i$, certificates}};
-  \node[dfbox, below=0.7cm of arch] (core) {BFT Core\\ {\scriptsize cumulative state, staking registry, Trust Base}};
+  \node[dfbox, below=0.7cm of prover] (arch) {Public round archive\\ {\scriptsize shard transitions, $c_i$, $R_i$, certificates}};
+  \node[dfbox, below=0.7cm of arch] (core) {BFT Core\\ {\scriptsize cumulative shard roots and Trust Base}};
   \node[dfbox, below=1.1cm of core] (shards) {Aggregation shards $\sigma = 1, \ldots, m$};
   \draw[arrow] ([xshift=-1.2cm]shards.north) -- node[left, font=\scriptsize] {$(r_{i-1,\sigma}, r_{i,\sigma}, \pi_{i,\sigma})$} ([xshift=-1.2cm]core.south);
   \draw[arrow] ([xshift=1.6cm]core.south) -- node[right, font=\scriptsize] {certificates} ([xshift=1.6cm]shards.north);
@@ -321,7 +359,7 @@ The aggregate proof is produced with a latency of minutes to hours behind the ce
 \subsection{Practical Security Assumptions}
 \label{sec:practical}
 
-If we relax the model by assuming that a majority of BFT consensus nodes exhibit economically rational behavior and do not collude maliciously with the Aggregation Layer, the user can enjoy significantly more practical operational parameters. BFT layer forking (case 2 above) or certifying conflicting states (case 3 above) produces strong cryptographic evidence which is processed out of the critical path of serving users.
+For immediate finality, we assume that a BFT quorum follows the protocol and does not collude maliciously with the Aggregation Layer. Under this standard consensus assumption, users obtain substantially better latency than the delayed full-history audit. BFT layer forking (case 2 above) or certification of conflicting states (case 3 above) produces strong cryptographic evidence that can be processed out of the critical path of serving users.
 
 In this scenario, a transaction is finalized, and an inclusion proof is returned within a few seconds, allowing the transaction to be independently verified—without consulting external data\footnote{Previously obtained Root of Trust is used to validate future transactions}—within the same timeframe.
 
@@ -465,7 +503,7 @@ Everything in Algorithm~\ref{alg:stackverify-core} beyond the digest algebra exi
 \subsection{Formal Model}
 \label{sec:consistency-formal}
 
-We fix the key length $\kappa = 256$, key space $\mathcal{K} = \{0,1\}^{\kappa}$, a value space $\mathcal{V} \subseteq \{0,1\}^{*}$, and a hash function $H \colon \{0,1\}^{*} \to \{0,1\}^{\lambda}$. For bit strings, $p \sqsubseteq q$ denotes that $p$ is a prefix of $q$, $q[j]$ is the $j$-th bit, and $q[0..d)$ is the first $d$ bits; $\langle\cdot\rangle$ are fixed-length injective encodings; $\varnothing$ is a distinguished constant outside $\{0,1\}^{\lambda}$. All statements below are unconditional reductions: each concludes either the stated property, or that two distinct strings with equal $H$-images (a \emph{collision}) are computable in time linear in the size of the objects at hand. We do not repeat this disjunction in every statement.
+We fix the key length $\kappa = 256$, key space $\mathcal{K} = \{0,1\}^{\kappa}$, a value space $\mathcal{V} \subseteq \{0,1\}^{*}$, and a hash function $H \colon \{0,1\}^{*} \to \{0,1\}^{\lambda}$. For bit strings, $p \preceq q$ denotes that $p$ is a prefix of $q$, $q[j]$ is the $j$-th bit, and $q[0..d)$ is the first $d$ bits; $\langle\cdot\rangle$ are fixed-length injective encodings; $\varnothing$ is a distinguished constant outside $\{0,1\}^{\lambda}$. All statements below are unconditional reductions: each concludes either the stated property, or that two distinct strings with equal $H$-images (a \emph{collision}) are computable in time linear in the size of the objects at hand. We do not repeat this disjunction in every statement.
 
 \subsubsection{Tree commitments}
 
@@ -478,7 +516,7 @@ with $k \in \mathcal{K}$, $v \in \mathcal{V}$, $0 \le d < \kappa$, $p \in \{0,1\
 \mathsf{dig}(\mathsf{Leaf}(k,v)) &= H(\texttt{0x00} \| k \| v),\\
 \mathsf{dig}(\mathsf{Node}(d,p,l,r)) &= H(\texttt{0x01} \| \langle d\rangle \| \langle p\rangle \| \mathsf{dig}(l) \| \mathsf{dig}(r)),
 \end{align*}
-and $\mathsf{dig}(\varepsilon) = \varnothing$. Region and depth: $\mathsf{reg}(\mathsf{Leaf}(k,v)) = k$ and $\mathsf{reg}(\mathsf{Node}(d,p,\cdot,\cdot)) = p$; $\mathsf{dep}(\mathsf{Leaf}) = \kappa$ and $\mathsf{dep}(\mathsf{Node}(d,\ldots)) = d$. A tree is \emph{valid} if every junction $\mathsf{Node}(d,p,l,r)$ in it satisfies: $l$ and $r$ are nonempty, $\mathsf{dep}(l) > d$, $\mathsf{dep}(r) > d$, $p\|0 \sqsubseteq \mathsf{reg}(l)$, and $p\|1 \sqsubseteq \mathsf{reg}(r)$. The trees $\varepsilon$ and $\mathsf{Leaf}(k,v)$ are valid.
+and $\mathsf{dig}(\varepsilon) = \varnothing$. Region and depth: $\mathsf{reg}(\mathsf{Leaf}(k,v)) = k$ and $\mathsf{reg}(\mathsf{Node}(d,p,\cdot,\cdot)) = p$; $\mathsf{dep}(\mathsf{Leaf}) = \kappa$ and $\mathsf{dep}(\mathsf{Node}(d,\ldots)) = d$. A tree is \emph{valid} if every junction $\mathsf{Node}(d,p,l,r)$ in it satisfies: $l$ and $r$ are nonempty, $\mathsf{dep}(l) > d$, $\mathsf{dep}(r) > d$, $p\|0 \preceq \mathsf{reg}(l)$, and $p\|1 \preceq \mathsf{reg}(r)$. The trees $\varepsilon$ and $\mathsf{Leaf}(k,v)$ are valid.
 \end{definition}
 
 The validity conditions are local: one condition per edge. The next three results separate their global consequences from the stronger persistence facts needed only for completeness.
@@ -493,7 +531,7 @@ Let $T$ be a valid tree. Then:
 \end{enumerate}
 \end{lemma}
 \begin{proof}
-(i) Validity gives $p\|\beta \sqsubseteq \mathsf{reg}(\text{child})$ at every edge, so by induction every node's region, and every leaf key, extends the region of each ancestor. Two leaves with the same key $k$ would sit on opposite sides of their lowest common ancestor $\mathsf{Node}(d,p,\cdot,\cdot)$, forcing both $p\|0 \sqsubseteq k$ and $p\|1 \sqsubseteq k$, which is impossible.
+(i) Validity gives $p\|\beta \preceq \mathsf{reg}(\text{child})$ at every edge, so by induction every node's region, and every leaf key, extends the region of each ancestor. Two leaves with the same key $k$ would sit on opposite sides of their lowest common ancestor $\mathsf{Node}(d,p,\cdot,\cdot)$, forcing both $p\|0 \preceq k$ and $p\|1 \preceq k$, which is impossible.
 
 (ii) Every key below $\mathsf{Node}(d,p,l,r)$ extends $p$. Both children are nonempty, so some key below extends $p\|0$ and some extends $p\|1$. The common prefix therefore ends after exactly the $d$ bits of $p$.
 
@@ -502,7 +540,7 @@ Let $T$ be a valid tree. Then:
 
 For a finite partial map $M$ and a bit string $q$, write
 \[
-  M_q = \{\,k \mapsto v \in M \mid q \sqsubseteq k\,\}
+  M_q = \{\,k \mapsto v \in M \mid q \preceq k\,\}
 \]
 for the restriction of $M$ to the key-space cone below $q$.
 
@@ -530,7 +568,7 @@ $\mathsf{Tree}(A)$ represents exactly $A_\varrho$. Moreover:
 \begin{proof}
 First consider a subtree $U$ with region $\varrho$ in $\mathsf{Tree}(A)$. Lemma~\ref{lem:shape}(i) shows that every key below $U$ extends $\varrho$. Conversely, key-directed descent places every key of $A_\varrho$ below $U$. Hence $\mathsf{map}(U)=A_\varrho$.
 
-(i) For the forward direction, the cone identity just proved and the two nonempty children supply keys extending $p\|0$ and $p\|1$. Conversely, suppose both restricted maps are nonempty and descend from the root of $\mathsf{Tree}(M)$. At a current junction with region $q$, the two selected key sets lie below it, so Lemma~\ref{lem:shape}(ii) gives $q \sqsubseteq p$. If $q \neq p$, all keys extending $p$ select the same child at depth $|q|$; recurse into that child. Depths increase, the two selected sets prevent termination at a leaf, and the descent therefore reaches the junction with region $p$.
+(i) For the forward direction, the cone identity just proved and the two nonempty children supply keys extending $p\|0$ and $p\|1$. Conversely, suppose both restricted maps are nonempty and descend from the root of $\mathsf{Tree}(M)$. At a current junction with region $q$, the two selected key sets lie below it, so Lemma~\ref{lem:shape}(ii) gives $q \preceq p$. If $q \neq p$, all keys extending $p$ select the same child at depth $|q|$; recurse into that child. Depths increase, the two selected sets prevent termination at a leaf, and the descent therefore reaches the junction with region $p$.
 
 (ii) The condition in (i) is monotone under extension from $M$ to $M \uplus B$, and a junction's depth is the length of its region.
 
@@ -620,7 +658,7 @@ with operands in the domains of Definition~\ref{def:opening}. Verification of $\
   \[
     q=H(\texttt{0x01}\|\langle d\rangle\|\langle p\rangle\|c^0\|c^1).
   \]
-  If $p\not\sqsubseteq k$, accept iff this is the final entry. If $p\sqsubseteq k$, require $p=k[0..d)$ and another entry, set $q=c^{k[d]}$, and continue.
+  If $p\not\preceq k$, accept iff this is the final entry. If $p\preceq k$, require $p=k[0..d)$ and another entry, set $q=c^{k[d]}$, and continue.
   \item At $E(k',v')$, accept iff this is the final entry,
   $q=H(\texttt{0x00}\|k'\|v')$, and $k'\neq k$.
 \end{enumerate}
@@ -754,7 +792,7 @@ Define $T' = \mathsf{graft}(P)$ by structural recursion: $S(c) \mapsto$ its assi
 (1)~Edges inside assigned subtrees are edges of $T$.
 (2)~The two edges below an $O$ graft: by the matching, the $O$ coincides with a junction of $T$ and its assigned children are the children of that junction in $T$; these are edges of $T$.
 (3)~An edge whose child is an $S$ graft: the parent is an $N$; the $S$ child is unadvised, so by confinement both old digests at the parent are non-$\varnothing$, and the parent appears in $P_0$ as an $\mathsf{ONode}$ with its derived region. The matching places this junction, and the $T$-subtree assigned to the $S$ hole below it, in $T$; this is an edge of $T$.
-(4)~Every remaining edge has an advised child. Coherence gives $\delta > d$ and, with agreement, $p\|\beta \sqsubseteq \varrho$; by the advice claim, $(\delta, \varrho)$ is the true depth and region of the child's top node. Edges of $T$ satisfy the validity conditions because $T$ is valid; edges of kind (4) satisfy them directly. Hence $T'$ is valid.
+(4)~Every remaining edge has an advised child. Coherence gives $\delta > d$ and, with agreement, $p\|\beta \preceq \varrho$; by the advice claim, $(\delta, \varrho)$ is the true depth and region of the child's top node. Edges of $T$ satisfy the validity conditions because $T$ is valid; edges of kind (4) satisfy them directly. Hence $T'$ is valid.
 
 \emph{Map.} The leaves of $T'$ are the leaves of assigned subtrees, the $O_L$ leaves, and the $L$ leaves. By clause (d) of the matching, the first two groups are exactly the leaves of $T$. The $L$ leaves carry exactly the elements of $B$. By Lemma~\ref{lem:shape}(i), all leaf keys of the valid $T'$ are distinct; hence the keys of $B$ are absent from $\mathsf{map}(T)$, and $\mathsf{map}(T') = \mathsf{map}(T) \uplus B$.
 \end{proof}
@@ -995,32 +1033,33 @@ Determinism is preserved across serial and parallel builds: \texttt{prove\_batch
 
 Operationally, the AIR-based consistency-proof producer is a drop-in component of the Unicity aggregator implementation. The proof's public statement is unchanged ($r_{i-1}, r_i$); only the proof bytes shipped from the Aggregation Layer to the Consensus Layer change. Speculative execution of the next round overlaps with the unicity-certificate wait of the current round, so the AIR's prover latency does not lengthen the user-visible round time.
 
-The entire proving stack runs on a single CPU. Unlike L1 ZK-rollup proving pipelines, there is no GPU farm, no proving market, no proving service in the critical path of a round. A single Aggregator that sustains $10\,000$ insertions per second fits within the power budget of a laptop charger. The one place where heavier proving does occur---the recursive aggregation of the next section---runs off the critical path, at checkpoint cadence, and by an independently incentivized party.
+The entire proving stack runs on a single CPU. Unlike L1 ZK-rollup proving pipelines, there is no GPU farm, no proving market, no proving service in the critical path of a round. A single Aggregator that sustains $10\,000$ insertions per second fits within the power budget of a laptop charger. The one place where heavier proving does occur---the recursive aggregation of the next section---runs off the critical path, at checkpoint cadence, and may be performed by any independent operator.
 
 
 \section{Proof Aggregation and Full-History Audit}
 \label{sec:aggregation-audit}
 
-The per-round consistency proofs of Section~\ref{sec:custom-air-circuit} are verified by the BFT Core before certification; a user who relies on a Unicity Certificate therefore relies on a quorum of the committee having performed that verification honestly. This section removes that remaining reliance. All per-round proofs, from all shards, over the entire operating history of the system, are folded into a single fixed-size STARK. Verifying this one proof establishes---under cryptographic assumptions alone---that every certified state transition since genesis was consistent, reducing the role of the stake-weighted committee from ``trusted to compute correctly'' to ``accountable for not equivocating''.
+The per-round consistency proofs of Section~\ref{sec:custom-air-circuit} are verified by the BFT Core before certification; a user who relies on a Unicity Certificate therefore relies on a quorum of the committee having performed that verification honestly. This section removes that remaining reliance. All per-round proofs, from all shards, over the entire operating history of the system, are folded into a single fixed-size STARK. Verifying this one proof establishes---under cryptographic assumptions alone---that every certified state transition since genesis was consistent, reducing the BFT committee's residual role from ``trusted to compute correctly'' to ``accountable for not equivocating''.
 
 \subsection{The Aggregate Statement}
 \label{sec:aggregate-statement}
 
-Fix a network instance identifier $\alpha$ and its genesis configuration digest $g$, which commits to the initial (empty) shard roots and the genesis Trust Base entry. For round $i$, let $R_i$ denote the global root: the root of the small, fixed-shape Merkle tree over the shard roots $(r_{i,1}, \ldots, r_{i,m})$ that the BFT Core maintains as its cumulative state (Section~\ref{sec:data-flow}). Let $D_i$ be an append-only commitment---a Merkle Mountain Range~\cite{mmr} (MMR)---to the sequence of certified global roots $\big((1, R_1), \ldots, (i, R_i)\big)$. The MMR supports two operations relevant here: appending an element (recomputable in-circuit from $D_{i-1}$ and a logarithmic-size witness) and proving membership of any $(j, R_j)$ against $D_i$ with a logarithmic-size path.
+Fix a network instance identifier $\alpha$ and its genesis configuration digest $g$, which commits to the initial sharding scheme $\mathcal{SH}_0$, its empty shard roots, and the genesis Trust Base entry. In round $i$, let $\mathcal{SH}_i$ be the active prefix scheme, let $c_i=H(\mathcal{SH}_i)$ be its canonical commitment, and let $R_i$ be the root of the prefix-shaped shard-root tree over $\{r_{i,\sigma}\}_{\sigma\in\mathcal{SH}_i}$ (Section~\ref{sec:sharding-architecture}). Let $D_i$ be an append-only commitment---a Merkle Mountain Range~\cite{mmr} (MMR)---to the certified sequence $\big((1,c_1,R_1),\ldots,(i,c_i,R_i)\big)$. The MMR supports appending an element (recomputable in-circuit from $D_{i-1}$ and a logarithmic-size witness) and proving membership of any $(j,c_j,R_j)$ against $D_i$ with a logarithmic-size path.
 
 \begin{definition}[Round correctness]
 \label{def:roundok}
 $\mathsf{RoundOK}(i)$ holds iff
 \begin{enumerate}[nosep]
-  \item for every shard $\sigma$: either $r_{i,\sigma} = r_{i-1,\sigma}$ (no change in this round), or the consistency proof $\pi_{i,\sigma}$ verifies for the transition $(r_{i-1,\sigma}, r_{i,\sigma})$ per Algorithm~\ref{alg:stackverify} (in its STARK-compressed form);
-  \item $R_i$ is the Merkle root of $(r_{i,1}, \ldots, r_{i,m})$; and
-  \item $D_i$ extends $D_{i-1}$ by exactly the element $(i, R_i)$.
+  \item for every shard that persists from $\mathcal{SH}_{i-1}$ to $\mathcal{SH}_i$, either its root is unchanged or its consistency proof $\pi_{i,\sigma}$ verifies the transition $(r_{i-1,\sigma},r_{i,\sigma})$ per Algorithm~\ref{alg:stackverify} (in its STARK-compressed form);
+  \item if $\mathcal{SH}_i\ne\mathcal{SH}_{i-1}$, every change replaces a prefix $\sigma$ by $\sigma\|0$ and $\sigma\|1$, and an authenticated split witness proves that the two child seed roots select exactly the corresponding subtrees of $r_{i-1,\sigma}$; any same-round child updates are then covered by ordinary consistency proofs from those seed roots;
+  \item $c_i=H(\mathcal{SH}_i)$ and $R_i$ is the root of the shard-root tree determined by $\mathcal{SH}_i$ and its current shard roots; and
+  \item $D_i$ extends $D_{i-1}$ by exactly the element $(i,c_i,R_i)$.
 \end{enumerate}
 \end{definition}
 
 The aggregate statement $\mathcal{A}_n$ is then: \emph{starting from the genesis configuration $g$, there exists a sequence of rounds $1, \ldots, n$ such that $\mathsf{RoundOK}(i)$ holds for every $i$}. Its public values are
-\[ \mathsf{pv}_n = (\alpha,\, g,\, n,\, R_n,\, D_n). \]
-Everything else---shard roots, per-round proofs, MMR witnesses---is private witness data, so the proof and its statement have constant size regardless of $n$ and of the number of shards.
+\[ \mathsf{pv}_n = (\alpha,\, g,\, n,\, c_n,\, R_n,\, D_n). \]
+Everything else---the intermediate sharding schemes and shard roots, per-round consistency and split proofs, and MMR witnesses---is private witness data, so the proof and its statement have constant size regardless of $n$ and of the number of shards.
 
 Note that validator signatures are absent from the statement. The aggregate proof does not verify the committee's quorum signatures, because the truth of $\mathcal{A}_n$ does not depend on \emph{who} certified the transitions; consistency is a property of the data itself. The link to the certified reality is made by the verifier, outside the proof, by checking that the roots it cares about coincide with Unicity Certificates validated against the Trust Base (Section~\ref{sec:maxi-validation}). Folding signature verification into the circuit is possible but adds cost without adding security: it still could not prevent a quorum from signing two divergent histories, which remains the only residual attack (Section~\ref{sec:residual-trust}).
 
@@ -1041,7 +1080,8 @@ We instantiate the recursion on the SP1 zkVM~\cite{sp1}, which supports the requ
 \begin{enumerate}[nosep]
   \item reads $\mathsf{pv}_{i-1}$ and verifies the previous aggregate proof against the aggregation program's own verifying-key digest, which is itself bound into the public values; the top-level verifier checks this digest once, against the value it knows from the software distribution, closing the recursion;
   \item for each round in the span and each shard with a changed root, verifies the shard's Plonky3 consistency STARK by running the STARK verifier as guest code. The shard proofs destined for aggregation use the SHA-256 FRI configuration (Table~\ref{tab:perf-frihash}) precisely so that this step is cheap: the verifier's work is dominated by FRI Merkle-path hashing, which maps directly onto the zkVM's SHA-256 precompile;
-  \item recomputes each round's global root $R_i$ from the shard roots, appends $(i, R_i)$ to the MMR, and commits $\mathsf{pv}_i$ as the new public values.
+  \item when the sharding-scheme commitment changes, verifies the split witnesses that bind each child seed root to the last certified parent root;
+  \item recomputes each round's scheme commitment $c_i$ and global root $R_i$, appends $(i,c_i,R_i)$ to the MMR, and commits $\mathsf{pv}_i$ as the new public values.
 \end{enumerate}
 
 The native verification cost of one shard proof is $\sim$18\,ms (Table~\ref{tab:perf-frihash}); executed in the zkVM, with precompile acceleration, this translates to on the order of $10^7$--$10^8$ RISC-V cycles, i.e., seconds of proving time per shard-round on server-class hardware. This is orders of magnitude more expensive than the shard's own proving, which is exactly why aggregation is kept off the critical path: it runs behind the certified tip at checkpoint cadence and never delays a round.
@@ -1051,11 +1091,9 @@ The output of each step is a compressed STARK of constant size, transparent (no 
 \subsection{The Aggregation Prover}
 \label{sec:aggregation-prover}
 
-Producing $\Pi_n$ is a pure computation over public data (Section~\ref{sec:data-availability}): the statement is deterministic, requires no private inputs and no authorization, and its output is universally verifiable. The role is therefore permissionless by construction; the design question is only who is incentivized to actually perform it.
+Producing $\Pi_n$ is a pure computation over public data (Section~\ref{sec:data-availability}): the statement is deterministic, requires no private inputs and no authorization, and its output is universally verifiable. No particular operator has a privileged role in its production.
 
-The incentive is a protocol bounty. The staking registry (part of the certified cumulative state) records the most recent accepted checkpoint $(n, \mathsf{pv}_n)$; a prover submits a candidate checkpoint $(\Pi_{n'}, \mathsf{pv}_{n'})$ with $n' > n$ to the BFT Core, which accepts it iff the proof verifies and its public values chain from the recorded ones---a purely mechanical judgment. The first accepted checkpoint past each protocol-defined target round earns a reward from the same emission that funds validator rewards (Section~\ref{sec:dpos}). The prover's reward address is committed inside the proof's public values, so a submitted proof cannot be intercepted and claimed by another party.
-
-Among candidate operators, BFT Core validators are the natural incumbents: they already retain the round artifacts, already run staked infrastructure, and can amortize hardware across roles. But they hold no privileged position---an independent prover with a mirror of the round archive competes on equal terms, and the presence of independent provers is desirable, since an aggregate proof produced by a party outside the committee is the strongest form of the audit. If no prover claims the bounty, no safety property degrades; the audit latency grows until governance raises the bounty. Like the aggregator nodes themselves, the aggregation prover is a disposable component: its unavailability is a service degradation, never a safety failure.
+Any operator with a mirror of the round archive can extend the latest checkpoint and publish $(\Pi_{n'},\mathsf{pv}_{n'})$ for $n'>n$. Acceptance is mechanical: the proof must verify, its public values must extend the recorded checkpoint, and the claimed final root must match the folded shard-root transitions. BFT Core validators are natural operators because they already retain the round artifacts, but they hold no privileged proving capability; an independent archive mirror produces the same proof. How deployments arrange the operation of this optional service is outside the protocol statement analyzed here. If no prover is available, immediate certificate-based operation is unaffected and only audit latency increases.
 
 \subsection{Data Availability}
 \label{sec:data-availability}
@@ -1064,7 +1102,7 @@ Two distinct data planes must remain available.
 
 \emph{Serving plane.} The contents of each shard's tree---the recorded keys and values---are needed to serve inclusion and non-inclusion proofs to users. This state is replicated within the shard's own validator cluster (Section~\ref{sec:practical}); its loss is a liveness failure of that shard, not a safety failure of the system, since the certified roots and the append-only discipline persist independently.
 
-\emph{Audit plane.} The per-round artifacts consumed by the aggregation prover: for each round $i$, the tuples $(r_{i-1,\sigma}, r_{i,\sigma}, \pi_{i,\sigma})$ for every changed shard, the global root $R_i$, the issued certificates, the Trust Base entries at epoch changes, and the accepted checkpoint proofs. All of these are public by design---the consistency proofs carry no user data (the insertion batches remain private witnesses of the \emph{shard} provers and are not needed for aggregation)---and are published to a content-addressed round archive replicated by the shards and the BFT Core validators, which anyone may mirror. At $\sim$1--2\,MB per shard per round, the archive grows at an entirely manageable rate.
+\emph{Audit plane.} The per-round artifacts consumed by the aggregation prover: for each round $i$, the tuples $(r_{i-1,\sigma}, r_{i,\sigma}, \pi_{i,\sigma})$ for every changed shard, the active sharding scheme and any split witnesses, the global root $R_i$, the issued certificates, the Trust Base entries at configuration changes, and the accepted checkpoint proofs. All of these are public by design---the consistency proofs carry no user data (the insertion batches remain private witnesses of the \emph{shard} provers and are not needed for aggregation)---and are published to a content-addressed round archive replicated by the shards and the BFT Core validators, which anyone may mirror. At $\sim$1--2\,MB per changed shard per round, archive growth is proportional to the number of shard transitions rather than transaction volume.
 
 The aggregate proof gives the archive a bounded retention requirement: once a span of rounds has been folded into an accepted checkpoint (plus a safety margin for independent re-verification), its artifacts may be pruned, because $\Pi_n$ subsumes them. Symmetrically, the archive gives the prover role its permissionless character: a new prover bootstraps from the latest accepted checkpoint and the archive tail, with no handover, registration, or historical sync beyond the unpruned window. New provers can join permissionlessly.
 
@@ -1078,11 +1116,11 @@ A user applying the maximalist model of Section~\ref{sec:maximalist} validates a
 \emph{Per audit:}
 \begin{enumerate}[nosep]
   \item Obtain the latest checkpoint $(\Pi_n, \mathsf{pv}_n)$ from any source; the source need not be trusted. Verify the STARK $\Pi_n$ against the known verifying-key digest, and check $\mathsf{pv}_n.\alpha = \alpha$ and $\mathsf{pv}_n.g = g$. This takes milliseconds to seconds on commodity hardware.
-  \item For each certificate in the received token's history that references a round $j \leq n$ with global root $R_j$: verify the MMR membership of $(j, R_j)$ in $\mathsf{pv}_n.D_n$ (a logarithmic-size path, obtainable from the round archive). This confirms that the roots anchoring the token's inclusion proofs lie on the proven, non-forking history.
+  \item For each certificate in the received token's history that references a round $j \leq n$ with sharding-scheme commitment $c_j$ and global root $R_j$: verify the MMR membership of $(j,c_j,R_j)$ in $\mathsf{pv}_n.D_n$ (a logarithmic-size path, obtainable from the round archive). This confirms both that the key was routed under the authenticated scheme and that the root anchoring its inclusion proof lies on the proven, non-forking history.
   \item For certificates younger than the checkpoint ($j > n$): validate them against the Trust Base as in the practical model (Section~\ref{sec:practical}), and re-audit when the next checkpoint arrives.
 \end{enumerate}
 
-If the user ever encounters two verifying checkpoints, or a verifying checkpoint and a quorum-signed certificate, that assign different global roots to the same round, this pair is publishable evidence of committee equivocation: it triggers slashing (Section~\ref{sec:dpos}) and the user rejects the affected token history.
+If the user ever encounters two verifying checkpoints, or a verifying checkpoint and a quorum-signed certificate, that assign different global roots to the same round, this pair is publishable evidence of committee equivocation, and the user rejects the affected token history.
 
 \subsection{Residual Trust Analysis}
 \label{sec:residual-trust}
@@ -1094,7 +1132,7 @@ The procedure above makes the reduction of assumptions precise. Under collision 
   \item the proven history is linear: each round extends its predecessor, and $D_n$ commits to the unique sequence of global roots.
 \end{enumerate}
 
-The honest-majority-of-stake assumption on the BFT Core is thereby reduced out of the correctness argument. What remains for the crypto-economic layer are exactly two properties: \emph{liveness} (rounds continue to be certified, proofs continue to be aggregated) and \emph{uniqueness of the tip} (a quorum could sign two divergent continuations, each internally consistent and each separately provable). The latter cannot be excluded by any proof system, since it is a statement about signing behavior, not about computation; it is instead made detectable by any observer holding two conflicting artifacts, attributable to specific keys, and punishable by slashing. In summary: safety of the recorded history rests on cryptography; uniqueness rests on accountability; only liveness rests on economics.
+The honest-quorum assumption on the BFT Core is thereby removed from the correctness argument for the proven history. Two consensus-level properties remain: \emph{liveness} (rounds continue to be certified and proofs remain available for aggregation) and \emph{uniqueness of the tip} (a quorum could sign two divergent continuations, each internally consistent and each separately provable). The latter cannot be excluded by any proof system, since it is a statement about signing behavior rather than computation; however, two conflicting artifacts make it detectable and attributable to specific signing keys. In summary, correctness of the recorded history rests on cryptography, whereas immediate progress and a unique live tip retain the standard BFT quorum assumptions.
 
 \section{Summary}
 
@@ -1102,9 +1140,9 @@ Zero-knowledge proof systems offer a powerful method for creating succinct proof
 
 Different proof systems offer different trade-offs. The relevant properties are proving effort, necessity (and generality) of trusted setup, interactivity, recursion-friendliness, and the maturity and trustworthiness of available tooling. STARKs are comparatively fast to prove but have larger proofs, and avoid undesirable properties such as trusted setup. Groth16 SNARKs produce small proofs but require more proving effort and a circuit-specific trusted setup. For more complex applications, hybrid approaches and proof recursion can be employed. Figure~\ref{fig:comp} illustrates the proof size trade-off.
 
-A second axis of optimization is the scope of the in-circuit statement itself. Drawing that scope correctly requires care: the seemingly sufficient structure-only statement admits a concrete cross-round equivocation attack (Remark~\ref{rem:placement}). The right kernel---\emph{append-only consistency}, i.e., prior-state preservation plus coherent placement of insertions, made locally checkable by the region-committing node hash---is proved sufficient in Theorem~\ref{thm:history}, while completeness and service properties remain self-policed by the protocol around the public root. This still turns a verification problem that naively would require reconstructing the globally unique tree shape into one with a tight, hand-built AIR. The result is the measured proving throughput reported in Section~\ref{sec:measured}: a single Aggregator on a single CPU sustainably exceeds $10\,000$ insertions per second with a 1.7\,MB transparent proof and tens of milliseconds verification time. This shows that operating a very large-scale Aggregation Layer in a trustless manner is economically feasible today, with no GPU farm or trusted setup, and on a power budget compatible with commodity hardware.
+A second axis of optimization is the scope of the in-circuit statement itself. Drawing that scope correctly requires care: the seemingly sufficient structure-only statement admits a concrete cross-round equivocation attack (Remark~\ref{rem:placement}). The right kernel---\emph{append-only consistency}, i.e., prior-state preservation plus coherent placement of insertions, made locally checkable by the region-committing node hash---is proved sufficient in Theorem~\ref{thm:history}, while completeness and service properties remain self-policed by the protocol around the public root. This still turns a verification problem that naively would require reconstructing the globally unique tree shape into one with a tight, hand-built AIR. The result is the measured proving throughput reported in Section~\ref{sec:measured}: a single Aggregator on a single CPU sustainably exceeds $10\,000$ insertions per second with a 1.7\,MB transparent proof and tens of milliseconds verification time. This shows that operating a very large-scale Aggregation Layer with cryptographically verified updates is practical today, with no GPU farm or trusted setup, and on a power budget compatible with commodity hardware.
 
-Above the per-round proofs sits the aggregation mechanism of Section~\ref{sec:aggregation-audit}: the consistency proofs of all shards and the Consensus Layer's own state transitions are folded, by recursion on a zkVM, into a single fixed-size transparent proof of the correctness of the system's entire operating history. The two validation paths complement each other. The pragmatic path, anchored in the Unicity Trust Base, delivers finality within seconds under an accountable honest-majority-of-stake assumption; the audit path, available with a delay of minutes to hours, retrospectively removes that assumption, leaving stake with only the roles of liveness and tip uniqueness. The consistency-proof mechanism now carries a formal correctness proof (Theorem~\ref{thm:history} and its corollaries): append-only consistency of the entire certified history reduces to the collision resistance of the underlying hash function. A machine-checked formalization of this proof is the natural next step.
+Above the per-round proofs sits the aggregation mechanism of Section~\ref{sec:aggregation-audit}: the consistency proofs of all shards and the Consensus Layer's own state transitions are folded, by recursion on a zkVM, into a single fixed-size transparent proof of the correctness of the system's entire operating history. The two validation paths complement each other. The pragmatic path, anchored in the Unicity Trust Base, delivers finality within seconds under the standard BFT quorum assumption; the audit path, available with a delay of minutes to hours, retrospectively removes that assumption from the correctness of the recorded history. The consistency-proof mechanism now carries a formal correctness proof (Theorem~\ref{thm:history} and its corollaries): append-only consistency of the entire certified history reduces to the collision resistance of the underlying hash function. A machine-checked formalization of this proof is the natural next step.
 
 \begin{figure}[!htbp]
     \centering

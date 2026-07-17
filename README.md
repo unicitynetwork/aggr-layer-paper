@@ -45,14 +45,11 @@ Unicity is a novel blockchain protocol with the ambitious goal of enabling peer-
 
 ## Related Implementations
 
-- [rsmt-air](https://github.com/ristik/rsmt-air) &mdash; reference
+- [rsmt-air](https://github.com/ristik/rsmt-air) -- reference
   implementation of the Plonky3 AIR proving Aggregation Layer
   consistency, including the `rsmt-bench` performance harness and the
-  adversarial tamper tests cited in Section 8.
-- [nd-smt](https://github.com/unicitynetwork/nd-smt) &mdash; earlier
-  CIRCOM/Groth16 experiment on non-deletion proofs (Section 6 in the
-  paper).
-- [zkvm-ndsmt](https://github.com/unicitynetwork/zkvm-ndsmt) &mdash;
-  SP1 zkVM-based consistency proof (Section 7 in the paper), integrated
-  to the [research implementation](https://github.com/ristik/rugregator)
+  adversarial tamper tests.
+- [ndsmt-experiments](https://github.com/ristik/ndsmt-experiments) --
+  prototyping and benchmarking of different RSMT implementation options
+- [research implementation](https://github.com/ristik/rugregator)
   of the Unicity Aggregator.

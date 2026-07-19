@@ -1,5 +1,5 @@
 \documentclass[twocolumn]{article}
-
+\usepackage[all]{nowidow}
 \usepackage{graphicx}
 \usepackage{amsmath}
 \usepackage{amssymb}
@@ -984,7 +984,7 @@ Hardware: 10-core Apple M1 ``Pro''; release build with utilizing 8 CPU cores; on
 \end{tabular}
 \end{table}
 
-\begin{table}[ht]
+\begin{table*}[htb]
 \centering
 \caption{Effect of FRI parameters (batch 4096).}
 \label{tab:perf-knobs}
@@ -998,7 +998,7 @@ small proof (blowup\,$=2$, q\,$=50$) & 198\,ms & 24\,ms & 0.93\,MB \\
 high grinding (bits\,$=24$, q\,$=92$) & 985\,ms & 42\,ms & 1.62\,MB \\
 \bottomrule
 \end{tabular}
-\end{table}
+\end{table*}
 
 \begin{table}[ht]
 \centering

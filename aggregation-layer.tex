@@ -1,5 +1,5 @@
 \documentclass[twocolumn]{article}
-\usepackage[all]{nowidow}
+
 \usepackage{graphicx}
 \usepackage{amsmath}
 \usepackage{amssymb}
@@ -20,6 +20,7 @@
 %\usepackage[margin=0.75in]{geometry}
 \usepackage{authblk}
 \usepackage{url}
+\usepackage{hyperref}
 \usepackage{algorithm}
 \usepackage{algpseudocode}
 \algblockdefx[EVENT]{Event}{EndEvent}%
@@ -40,10 +41,13 @@
 \newtheorem{remark}{Remark}
 
 \tikzset{
-    block/.style={rectangle, draw, text centered, minimum height=2em, minimum width=5cm},
-    triangle/.style={regular polygon, regular polygon sides=3, draw, minimum size=3cm},
-    arrow/.style={-{Latex}},
-    labelstyle/.style={font=\normalsize},
+    diagram/.style={font=\small},
+    diagram box/.style={rounded corners, draw, align=center,
+        minimum width=2.15cm, minimum height=0.75cm},
+    diagram arrow/.style={-{Latex}, semithick},
+    diagram double arrow/.style={<->, >={Latex}, semithick},
+    diagram connector/.style={semithick},
+    diagram label/.style={font=\scriptsize, fill=white, inner sep=1.5pt},
 }
 
 \lstset{
@@ -109,13 +113,13 @@ The Unicity Aggregation Layer proves a much smaller statement: not ``the VM exec
 
 Privacy-oriented chains such as Zcash~\cite{zerocash} use ZK-SNARKs to hide transaction contents---sender, receiver, and amount---behind a commitment scheme. A spent note is identified by a public \emph{nullifier} derived from a secret, and the chain maintains a global nullifier set to prevent double-spending. The ZK proof at spend time asserts that the spender knows a commitment in the note tree and the corresponding nullifier without revealing which one. Each user-level transaction therefore carries its own succinct ZK proof.
 
-The Unicity protocol does not use ZK for transaction privacy. Privacy of payloads and recipient information is achieved structurally, by keeping transaction execution off-chain and exposing only an unlinkable per-spend identifier to the global system; the user wallet and service-side privacy aspects of this model are detailed in the companion paper~\cite{exemodel}. ZK is used only for the much narrower purpose of compressing the Aggregation Layer's per-round consistency proof on its way to the Consensus Layer. Consequently, the prover does not need to run a circuit per user transaction; one batch proof per round amortizes over thousands of transactions, and there is no anonymity-set scaling cost.
+The Unicity protocol does not use ZK for transaction privacy. Privacy of payloads and recipient information is achieved structurally, by keeping transaction execution off-chain and exposing only an unlinkable per-spend identifier to the global system; the user wallet and service-side privacy aspects of this model are detailed in the companion paper~\cite{exemodel}. ZK is used for comutational integrity, like compressing Aggregation Layer's per-round consistency proof on its way to the Consensus Layer, where the prover does not need to run a circuit per user transaction; one batch proof per round amortizes over thousands of transactions, and there is no anonymity-set scaling cost.
 
 \subsection{Comparison with Nullifier-Tree Mixers}
 
 Nullifier-tree mixers such as Tornado Cash~\cite{tornado} occupy a third design point. They maintain two related authenticated structures: a commitment tree of deposits (a Merkle tree of fixed-denomination notes) and a nullifier set of spent notes. Each withdrawal is accompanied by a ZK proof that the withdrawer knows a deposit commitment in the tree and the associated nullifier, with the nullifier being inserted into the nullifier set to block double-withdrawals. The anonymity set is the population of unspent notes; the privacy guarantee is fundamentally tied to that set's size.
 
-The Unicity Aggregation Layer's SMT is, on the surface, also a structure for preventing double-use of a one-time identifier. The differences are substantive. First, Unicity has no anonymity-set construction: spent state IDs are recorded in clear in the SMT, and unlinkability is provided by the off-chain execution model rather than by hiding the spend inside a crowd~\cite{exemodel}. Second, the ZK proof boundary is different: in a nullifier-tree mixer the ZK proof is produced \emph{by the user} for each withdrawal and the chain only verifies it, whereas in Unicity the ZK proof is produced \emph{by the aggregator} once per batched round and is invisible to end users. Third, the underlying tree semantics differ: Tornado's commitment tree is an append-only log used for set-membership proofs, while Unicity's SMT is a keyed dictionary used both for inclusion (Proof of Unicity for the current spend) and non-inclusion (proof that a given state has not yet been spent) proofs.
+By function, the Unicity Aggregation Layer's SMT is also a structure for preventing double-use of a one-time identifier. The mechanism differs. First, Unicity has no anonymity-set construction: spent state IDs are recorded in clear in the SMT, and unlinkability is provided by the off-chain execution model rather than by hiding the spend inside public blockchain~\cite{exemodel}. Second, the ZK proof boundary and statement are different: in a nullifier-tree mixer the ZK proof is produced \emph{by the user} for each withdrawal and the chain only verifies it, whereas in Unicity the ZK proof is produced \emph{by the aggregator} once per batched round and is not directly shown to users. Third, the underlying tree semantics differ: Tornado's commitment tree is an append-only log used for set-membership proofs, while Unicity's SMT is a keyed dictionary used both for inclusion (Proof of Unicity for the current spend) and non-inclusion (proof that a given state has not yet been spent) proofs.
 
 \subsection{Why ZK Proving in Unicity Is Comparatively Efficient}
 
@@ -144,13 +148,16 @@ Aggregation Layer connects to the Consensus Layer. For fully trustless operation
 
 \begin{figure}[!htbp]
     \centering
-        \begin{tikzpicture}
-            \draw (0,0) rectangle (4,1) node[midway] {Consensus Layer};
-            \draw (2,0) -- (2,-0.5);
-            \draw (0,-1.5) rectangle (4,-0.5) node[midway] {Aggregation Layer};
-            \draw[dashed] (1,-2) -- (3,-2);
-            \draw (2,-1.5) -- (2,-2.5);
-            \draw (0,-3.5) rectangle (4,-2.5) node[midway] {Execution Layer};
+        \begin{tikzpicture}[diagram]
+            \node[diagram box, minimum width=4cm, minimum height=1cm]
+                (consensus) at (0,0) {Consensus Layer};
+            \node[diagram box, minimum width=4cm, minimum height=1cm]
+                (aggregation) at (0,-1.5) {Aggregation Layer};
+            \node[diagram box, minimum width=4cm, minimum height=1cm]
+                (execution) at (0,-3.5) {Execution Layer};
+            \draw[diagram connector] (consensus.south) -- (aggregation.north);
+            \draw[diagram connector] (aggregation.south) -- (execution.north);
+            \draw[diagram connector, dashed] (-1,-2.5) -- (1,-2.5);
         \end{tikzpicture}
     \caption{Layered architecture of the Unicity Network.}\label{fig:layers}
 \end{figure}
@@ -175,12 +182,10 @@ The Aggregation Layer periodically has its state authenticator certified by the 
 \begin{figure*}[!t]
     \centering
     \begin{tikzpicture}[
-        font=\small,
-        corebox/.style={rectangle, rounded corners=2pt, draw,
-            align=center, minimum width=14.8cm, minimum height=1.25cm},
-        shardbox/.style={rectangle, rounded corners=2pt, draw,
-            align=center, minimum width=3.1cm, minimum height=1.65cm},
-        certflow/.style={<->, >={Latex[length=2mm]}, thick}
+        diagram,
+        corebox/.style={diagram box, minimum width=14.8cm, minimum height=1.25cm},
+        shardbox/.style={diagram box, minimum width=3.1cm, minimum height=1.65cm},
+        certflow/.style={diagram double arrow}
     ]
         \node[corebox] (core) at (0,2.0) {\textbf{BFT Core}\\
             certifies shard-root transitions and commits $c_i=H(\mathcal{SH}_i)$ and
@@ -200,7 +205,7 @@ The Aggregation Layer periodically has its state authenticator certified by the 
         \draw[certflow] (s10.north) -- (s10.north |- core.south);
         \draw[certflow] (s11.north) -- (s11.north |- core.south);
 
-        \node[font=\scriptsize, align=center, fill=white, inner sep=1.5pt]
+        \node[diagram label, align=center]
             at (0,0.82) {root transition + consistency proof $\uparrow$\qquad
                          Unicity Certificate $\downarrow$};
     \end{tikzpicture}
@@ -208,16 +213,13 @@ The Aggregation Layer periodically has its state authenticator certified by the 
 \end{figure*}
 
 \paragraph{Deterministic keyspace partition.}
-Let keys be $\kappa$-bit strings and let the sharding scheme $\mathcal{SH}\subseteq\{0,1\}^{*}$ be prefix-free and exhaustive: no shard identifier is a prefix of another, and every $\kappa$-bit key has a prefix in $\mathcal{SH}$. It induces the total routing function
-\[
-    f_{\mathcal{SH}}(k)=\text{the unique }\sigma\in\mathcal{SH}
-    \text{ such that }\sigma\preceq k.
-\]
-(where $\preceq k$ denotes that bit-string $\sigma$ is a prefix of bit-string $k$).
-Shard $\sigma$ maintains an independent RSMT $T_\sigma$ containing exactly the bindings whose keys satisfy $f_{\mathcal{SH}}(k)=\sigma$. Routing therefore depends only on public key bits: it needs neither a directory lookup nor cross-shard execution, and two requests addressed to different prefixes can be batched, inserted, and proved concurrently.
+Let the keys be $\kappa$-bit strings. A sharding scheme $\mathcal{SH}\subseteq\{0,1\}^{*}$ is a code such that for every $k\in\{0,1\}^\kappa$ there is a unique $w\in\mathcal{SH}$ (denoted by $f_{\mathcal{SH}}(k)$) such that $w\preceq k$, i.e.
+every key has a unique prefix in $\mathcal{SH}$. The codewords of $\mathcal{SH}$ are used as shard identifiers and the function
+$f_{\mathcal{SH}}\colon \{0,1\}^\kappa\rightarrow \mathcal{SH}$ is called the routing function.
+Every shard $\sigma\in\mathcal{SH}$ maintains an independent RSMT $T_\sigma$ containing exactly the bindings whose keys satisfy $f_{\mathcal{SH}}(k)=\sigma$. Routing therefore depends only on public information: the bits of the key. No directory lookups are needed. Requests related to keys of different shards can be batched, inserted, and proved concurrently.
 
 \paragraph{Authentication across shards.}
-In each BFT Core round, the latest root of every shard is a leaf of a Merkle \emph{shard-root tree}; a shard that does not advance retains its previous root. The tree root $R_i$ commits to the entire Aggregation Layer state, while $c_i=H(\mathcal{SH}_i)$ binds its active prefix partition. A Unicity Certificate for shard $\sigma$ authenticates $c_i$, authenticates $r_{i,\sigma}$ to $R_i$ with the sibling hashes on the prefix path, and authenticates $R_i$ with the BFT Core's quorum certificate. Consequently, an inclusion or non-inclusion proof has two independent parts: a local RSMT path within $T_\sigma$, and a short shard-root path to $R_i$. Neither part grows with transaction throughput; the latter contains $|\sigma|$ sibling hashes.
+Let $\mathcal{SH}_i$ denote the sharding scheme used in round $i$. The latest root hashes $r_{i,\sigma}$ of all shards $\sigma\in\mathcal{SH}_i$ are the leaves of a Merkle \emph{shard-root tree}; a shard $\sigma$ that does not advance retains its previous root hash $r_{i-1,\sigma}$. The root of the shard root tree is a pair $(c_i,R_i)$, where $R_i$ is the root hash of the entire Aggregation Layer state, while $c_i=H(\mathcal{SH}_i)$ binds to the sharding scheme. A Unicity Certificate for shard $\sigma$ authenticates $c_i$, authenticates $r_{i,\sigma}$ to $R_i$ with the sibling hashes on the prefix path, and authenticates $R_i$ with the BFT Core's quorum certificate. Consequently, an inclusion or non-inclusion proof has two independent parts: a local RSMT path within $T_\sigma$, and a short shard-root path to $R_i$. Neither part grows with transaction throughput; the latter contains $|\sigma|$ sibling hashes.
 
 \paragraph{Dynamic shard splitting.}
 A busy shard can be split by replacing one prefix $\sigma$ in $\mathcal{SH}$ with the two children $\sigma\|0$ and $\sigma\|1$. The children retain the parent leaves selected by the next key bit. Because RSMT leaves commit to full keys and internal nodes commit to absolute bifurcation depths and key regions (Section~\ref{sec:stack-verifier}), each child root is either the hash of an existing parent subtree or the canonical empty root; retained nodes need not be rehashed and the certified history need not be replayed. The split is activated as a configuration change, after which both children evolve and prove independently. A local RSMT certificate may lose the junction at the split depth while its shard-root certificate gains one sibling hash, moving authentication work from the shard-local tree to the common root without introducing another aggregation tier.
@@ -230,7 +232,7 @@ If shard $\sigma$ sustains insertion rate $q_\sigma$, the Aggregation Layer sust
 subject to the BFT Core's capacity for shard summaries. A shard round containing thousands of insertions exports only $(r_{i-1,\sigma},r_{i,\sigma},\pi_{i,\sigma})$, where the succinct consistency proof $\pi_{i,\sigma}$ has verifier cost independent of the number of stored leaves and is verified independently of other shards. Thus, adding a shard adds storage, batching, and proving capacity without increasing any existing shard's workload; the Core's work grows with the number of advancing shards, not with $Q$. These verifications are mutually independent and can be parallelized. The off-critical-path construction of Section~\ref{sec:aggregation-audit} subsequently folds all changed-shard proofs and the corresponding $R_i$ transitions into one recursively updated proof whose public statement remains fixed-size regardless of the number of shards or elapsed rounds.
 
 \paragraph{Per-shard consistency.}
-Once a key is set, it must remain there permanently. Every shard transition is therefore accompanied by a cryptographic proof that pre-existing keys were neither removed nor modified and that new keys were placed at the positions determined by the keys themselves. The direct hash-based witness grows with the insertion batch, whereas the STARK construction of Section~\ref{sec:custom-air-circuit} makes the public statement just the old and new shard roots and gives succinct verification independent of the batch size. Correct verification and BFT chaining of those roots make each shard an untrusted, cryptographically checked service.
+Once a key is set, it must remain there permanently. Every shard transition is therefore accompanied by a cryptographic proof that pre-existing keys were neither removed nor modified and that new keys were placed at the positions determined by the keys themselves. The direct hash-based witness grows with the insertion batch, whereas the STARK construction of Section~\ref{sec:custom-air-circuit} makes the public statement just about the old and new shard roots and gives succinct verification independent of the batch size. Correct verification and BFT chaining of those roots make each shard an untrusted, cryptographically checked service.
 
 
 \subsection{Execution Layer}
@@ -244,18 +246,18 @@ Figure~\ref{fig:dataflow} summarizes the flow of authenticated data through the 
 
 \begin{figure}[!htbp]
     \centering
-\begin{tikzpicture}[font=\small,
-  dfbox/.style={rectangle, draw, align=center, minimum height=2.2em, minimum width=5.6cm}]
+\begin{tikzpicture}[diagram,
+  dfbox/.style={diagram box, minimum width=5.6cm}]
   \node[dfbox] (verifier) {Auditing user};
   \node[dfbox, below=0.7cm of verifier] (prover) {Aggregation prover (permissionless)};
   \node[dfbox, below=0.7cm of prover] (arch) {Public round archive\\ {\scriptsize shard transitions, $c_i$, $R_i$, certificates}};
   \node[dfbox, below=0.7cm of arch] (core) {BFT Core\\ {\scriptsize cumulative shard roots and Trust Base}};
   \node[dfbox, below=1.1cm of core] (shards) {Aggregation shards $\sigma = 1, \ldots, m$};
-  \draw[arrow] ([xshift=-1.2cm]shards.north) -- node[left, font=\scriptsize] {$(r_{i-1,\sigma}, r_{i,\sigma}, \pi_{i,\sigma})$} ([xshift=-1.2cm]core.south);
-  \draw[arrow] ([xshift=1.6cm]core.south) -- node[right, font=\scriptsize] {certificates} ([xshift=1.6cm]shards.north);
-  \draw[arrow] (core) -- node[right, font=\scriptsize] {per-round artifacts} (arch);
-  \draw[arrow] (arch) -- node[right, font=\scriptsize] {fetch, fold recursively} (prover);
-  \draw[arrow] (prover) -- node[right, font=\scriptsize] {$(\Pi_n, \mathsf{pv}_n)$} (verifier);
+  \draw[diagram arrow] ([xshift=-1.2cm]shards.north) -- node[diagram label, left] {$(r_{i-1,\sigma}, r_{i,\sigma}, \pi_{i,\sigma})$} ([xshift=-1.2cm]core.south);
+  \draw[diagram arrow] ([xshift=1.6cm]core.south) -- node[diagram label, right] {certificates} ([xshift=1.6cm]shards.north);
+  \draw[diagram arrow] (core) -- node[diagram label, right] {per-round artifacts} (arch);
+  \draw[diagram arrow] (arch) -- node[diagram label, right] {fetch, fold recursively} (prover);
+  \draw[diagram arrow] (prover) -- node[diagram label, right] {$(\Pi_n, \mathsf{pv}_n)$} (verifier);
 \end{tikzpicture}
     \caption{Data flow from the shards to the auditing verifier. The pragmatic validation path (Section~\ref{sec:practical}) uses the certificates directly; the audit path uses the aggregate proof $\Pi_n$.}\label{fig:dataflow}
 \end{figure}
@@ -263,15 +265,28 @@ Figure~\ref{fig:dataflow} summarizes the flow of authenticated data through the 
 
 \section{Security Model of the Aggregation Layer}
 
-The Aggregation Layer implements a distributed, authenticated, append-only dictionary data structure.
-It authenticates incoming state transfer certification requests by verifying that the sender possesses the private key corresponding to the public key that identifies the current token owner. The specific authentication protocol is beyond the scope of this paper.
+The Aggregation Layer implements a distributed, authenticated, append-only dictionary data structure. It authenticates incoming state transfer certification requests (store new key-value pairs $(k,v)$ to the accumulator) by verifying that the sender possesses the private key corresponding to the public key that identifies the current token owner. The specific authentication protocol is beyond the scope of this paper.
+
+After every round $i$, the state of the aggregator represents a partial function $M_i$ such that for every key $k\in\{0,1\}^\kappa$,
+either $M_i(k)=v$ (if a pair $(k,v)$ was accumulated) or $M_i(k)=\bot$ (if no pairs $(k,v)$ were accumuleted). As $M_i$ is required to be a partial function, from $M_i(k)=v\neq\bot$ it follows that no other pairs $(k,v')$ with $v'\neq v$ can be accumulated. Initially, the partial function is $M_0=\emptyset$, i.e. $M_0(k)=\bot$ for every key $k$.
+
+It is also required that for every $i$, the function $M_{i+1}$ extends the function $M_i$ (denoted by $M_i\subseteq M_{i+1}$), i.e. if $M_i(k)=v\neq\bot$, then $M_{i+1}(k)=v$. This property formalizes the append-only property of the aggregator.
+
+The partial function $M_i$ is certified by computing a digest $r_i=\mathsf{Dig}(M_i)$, which is implemented as the root hash $\mathsf{dig}(T)$ of the RSMT $T=\mathsf{Tree}(M_i)$ of the set of all pairs $(k,v)\in M_i$. Two kinds of cryptographic proofs are used:
+\begin{itemize}
+\item \emph{Inclusion/Non-inclusing proofs} that certify statements $M_i(k)=v$ and are verified against the digest $r_i$, given the pair $(k,v)$. If $v\neq\bot$, the proof is called an inclusion proof, othervise it is called a non-inclusion proof. These proofs are used by users to check the validity of token transfers.
+\item \emph{Extension proofs} that certify the statements $M_i\subseteq M_{i+1}$ and are verified against the digests $r_i$ and $r_{i+1}$. These proofs are used by the Consensus Layer to check that the previous contents of the aggregator were not modified during the round $i+1$.
+\end{itemize}
+
+If $M_i(k)=v$, then the inclusion/non-inclusion proof is easy to construct and if $M_{i}\subseteq M_{i+1}$ then the extension proof is easy to construct.
+
+An append-only accumulator starts from the empty partial map $M_0$ and incorporates batches of fresh key--value bindings, producing partial functions $M_1,M_2,\ldots$ and authenticated roots $r_1,r_2,\ldots$. We require the following security property:
 
 \begin{definition}[Consistency]
-An append-only accumulator starts from the empty partial map $M_0$ and incorporates batches of fresh key--value bindings, producing cumulative maps $M_1,M_2,\ldots$ and authenticated roots $r_1,r_2,\ldots$. It is \emph{consistent} if, for every state $i$:
 \begin{enumerate}[nosep,label=(\roman*)]
-  \item $M_i$ extends $M_{i-1}$ without deleting or changing a binding;
-  \item a verifying inclusion certificate for $(k,v)$ against $r_i$ exists exactly when $M_i(k)=v$;
-  \item a verifying non-inclusion certificate for $k$ against $r_i$ exists exactly when $k\notin\mathrm{dom}(M_i)$.
+  \item If an extension proof is successfully verified against $r_i,r_{i+1}$, then the creator of the proof must know partial functions $M_i\subseteq M_{i+1}$ such that $\mathsf{Dig}(M_i)=r_i$ and $\mathsf{Dig}(M_{i+1})=r_{i+1}$.
+  \item It is computationally infeasible to find $(k,r,v,v')$ with $v\neq v'$ and two inclusion/non-inclusion proofs
+  $\pi$ (for $M_i(k)=v$) and $\pi'$ (for $M_i(k)=v'$) that both successfully verify against $r$.
 \end{enumerate}
 \label{def:append-only-accumulator}
 \end{definition}
@@ -283,18 +298,18 @@ After each batch of additions, the new root of the Aggregation Layer's SMT is ce
 
 \begin{figure}[!htbp]
     \centering
-\begin{tikzpicture}[node distance=2cm and 2cm]
+\begin{tikzpicture}[diagram, node distance=2cm and 2cm]
 
     % Nodes
-    \node[block] (consensus) {Consensus Layer};
-    \node[triangle, below=of consensus] (triangle) {SMT};
-    \node[block, below=of triangle] (users) {Token Users};
+    \node[diagram box, minimum width=5cm] (consensus) {Consensus Layer};
+    \node[diagram box, minimum width=3cm, below=of consensus] (smt) {SMT};
+    \node[diagram box, minimum width=5cm, below=of smt] (users) {Token Users};
 
     % Arrows
-    \draw[arrow] ([xshift=-0.1cm]triangle.north) -- ++(0,1) node[labelstyle, left] {$(r_i, r_{i-1}, \pi)$} -- ([xshift=-0.1cm]consensus.south);
-    \draw[arrow] ([xshift=0.1cm]consensus.south) -- node[labelstyle, right] {$c = (i, r_i, r_{i-1}; s_{\textsf{cl}})$} ([xshift=0.1cm]triangle.north);
-    \draw[arrow] ([xshift=-0.4cm]users.north) -- node[labelstyle, left] {$B = (k_1, k_2, \ldots, k_j)$} ([xshift=-0.4cm]triangle.south);
-    \draw[arrow] ([xshift=0.4cm]triangle.south) -- ++(0,-1) node[labelstyle, right] {
+    \draw[diagram arrow] ([xshift=-0.1cm]smt.north) -- ++(0,1) node[diagram label, left] {$(r_i, r_{i-1}, \pi)$} -- ([xshift=-0.1cm]consensus.south);
+    \draw[diagram arrow] ([xshift=0.1cm]consensus.south) -- node[diagram label, right] {$c = (i, r_i, r_{i-1}; s_{\textsf{cl}})$} ([xshift=0.1cm]smt.north);
+    \draw[diagram arrow] ([xshift=-0.4cm]users.north) -- node[diagram label, left] {$B = (k_1, k_2, \ldots, k_j)$} ([xshift=-0.4cm]smt.south);
+    \draw[diagram arrow] ([xshift=0.4cm]smt.south) -- ++(0,-1) node[diagram label, right] {
             $\substack{
                 \pi^{\textsf{inc}}_{k \in \{B_1, \dots, B_i\}} = (v_k \leadsto r, c) \\
                 \pi^{\overline{\textsf {inc}}}_{k \notin \{B_1, \dots, B_i\}} = (\varnothing_k \leadsto r, c)
@@ -398,6 +413,48 @@ The remaining desirable properties of the Aggregation Layer stay outside the ker
 Restricting the in-circuit statement to append-only consistency has several useful consequences. First, the witness need not contain the actual batch contents---the prover may keep them entirely private and bind them to the proof through the soundness chain of the circuit (Section~\ref{sec:custom-air-circuit}). This shrinks the public statement to the two root digests. Second, the circuit does not have to \emph{reconstruct} the unique global tree shape from scratch, which is by far the most constraint-heavy aspect of any naive arithmetization (cf.~\cite{rsmtair}, ``cost-of-canonical detour''); with the region-committing hash of Section~\ref{sec:stack-verifier}, coherent placement is checked by local constraints on the touched nodes only. Third, the proof scales with the batch size alone, not with the total tree capacity.
 
 
+\section{Design Rationale for the Authenticated Dictionary}
+\label{sec:tree-design}
+
+The authenticated dictionary lies on two critical paths. Users obtain inclusion certificates and store them in the tokens, in many copies, so their size should be optimal --- the limit is one sibling digest per actual branch. The Consensus Layer verifies a consistency proof for every batch and for every shard; the proof should be short, the algorithm efficient and inexpensive to arithmetize. At the same time, the operator is untrusted, so neither compactness nor speed may weaken append-only consistency. These requirements lead to the design below.
+
+\subsection{Indexed and Radix Trees}
+
+A conventional indexed SMT (\emph{Sparse Merkle Tree}) assigns every key to a leaf of a fixed-depth binary tree. Empty subtrees are implicit, and storage and proofs can omit single-child chains. Its main security advantage is that the placement is part of the tree semantics, so a prover cannot choose an alternative path for a key. A batch-consistency witness supplies the untouched sibling subtrees around the batch, and the verifier reconstructs the old root with the batch positions empty and the new root with them populated. A post-order stack encoding makes this construction reasonably regular, although stack entries and branch instructions must still carry absolute positions in the indexed tree.\footnote{Experiment: \href{https://github.com/ristik/ndsmt-experiments/blob/main/ndsmt_op.py}{https://github.com/.../ndsmt\_op.py}}
+
+Alternative is breadth-first traversal, where the witness is a per-layer array of ordered missing siblings necessary to reconstruct the old and new roots. This results in a one-pass (per root) linear verification algorithm, without lookups.\footnote{Experiment: \href{https://github.com/ristik/ndsmt-experiments/blob/main/ndsmt_lvl.py}{https://github.com/.../ndsmt\_lvl.py}}
+
+A Patricia or radix tree makes path compression part of the committed structure instead. It stores only leaves and  bifurcations, rather than making intractably large tree manageable through optimizations. Hashing the full key with the value anchors each leaf, and committing an internal node to its absolute bifurcation depth makes every existing node immutable when a later insertion splits an edge above it. The touched post-state can then be serialized with three basic instructions: a preserved subtree \(S\), a new leaf \(L\), and a junction \(N\). A stack machine evaluates the same transcript twice, passing preserved hashes through on the old side and constructing the new root on the other. This is a natural shape for tabular AIR arithmetization: the verifier is a single forward scan (passes to compute pre-state and post-state are natural to combine) with bounded stack state and one local rule per instruction.
+
+Path compression also gives compact user proofs. An inclusion certificate needs one sibling hash per junction on the search path and a bitmap (or list) of their depths; on random keys the number of such junctions grows logarithmically with the capacity. But, the extra complexity is that the canonical data-structure construction must be validated by the verifier, specifically the proof must establish that each prover-supplied junction is in the correct key-space region.
+
+\subsection{Authenticating Placement}
+
+Committing a radix junction only to its two children and bifurcation depth gives the smallest structural verifier,\footnote{Experiment: \href{https://github.com/ristik/ndsmt-experiments/blob/main/ndrsmt3o.py}{https://github.com/.../ndrsmt3o.py}} but it is insufficient for trustless operation. As Remark~\ref{rem:placement} demonstrates, an operator can attach a preserved tree to the wrong side of a new junction and insert a second value for an already recorded key on the key-directed side. Both root computations still agree with the transcript. Thus, preservation of hashes is not yet preservation of the authenticated dictionary: the new edges must also be coherent with their keys.
+
+There are two natural ways to authenticate this missing information. A \emph{range commitment} includes the smallest and largest key below every junction. It lets the verifier authenticate a split using the adjacent child boundaries, but the cost reaches user proofs: each sibling must carry two additional 256-bit keys as well as its digest.\footnote{Experiment: \href{https://github.com/ristik/ndsmt-experiments/blob/main/rsmt4.py}{https://github.com/.../rsmt4.py}}
+A \emph{region commitment} instead includes the junction's absolute key prefix \(p\) alongside its depth \(d\). Whenever an insertion creates an edge, the consistency verifier checks locally that the child is deeper and that its region extends \(p\|0\) or \(p\|1\), according to its side. Old--old edges need not be reopened because the hash freezes checks made in earlier rounds.\footnote{Experiment: \href{https://github.com/ristik/ndsmt-experiments/blob/main/rsmt6.py}{https://github.com/.../rsmt6.py}}
+
+The region is derivable from the queried key during inclusion verification, so it adds no bytes to the inclusion certificate. It need not appear in every \(N\) instruction either: the consistency verifier derives the parent region from authenticated child advice and requires both children to be opened where a new junction meets a preserved subtree. The resulting proof retains the small post-order machine while closing the placement attack.\footnote{Experiment: \href{https://github.com/ristik/ndsmt-experiments/blob/main/rsmt6a.py}{https://github.com/.../rsmt6a.py}}
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=0.92\textwidth]{figures/tree_design_consistency.pdf}
+    \caption{Native consistency-proof costs for the principal design points. Each round inserts \(10\,000\) uniformly distributed keys; 30 rounds grow the tree to \(300\,000\) leaves. The left panel reports the median of three Python/SHA-256 verification runs and the right panel counts native hash invocations. The depth-only RSMT is included as a performance lower bound but does not enforce coherent placement.}
+    \label{fig:tree-design-consistency}
+\end{figure*}
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\columnwidth]{figures/tree_design_inclusion.pdf}
+    \caption{Median inclusion-certificate size, sampled over 32 inserted keys per round in the workload of Figure~\ref{fig:tree-design-consistency}. The region commitment preserves the compact depth-only format; authenticated ranges enlarge every sibling operand.}
+    \label{fig:tree-design-inclusion}
+\end{figure}
+
+\subsection{Resulting Choice}
+
+Figures~\ref{fig:tree-design-consistency} and~\ref{fig:tree-design-inclusion} show the relevant compromise. The indexed SMT remains a sound and useful baseline, while the depth-only radix construction marks the compactness attainable if placement is ignored. Authenticating subtree ranges restores soundness but makes the inclusion certificate substantially larger. Region commitments restore the same security with local, regular checks and leave inclusion certificates at the depth-only size. We therefore select the region-committing RSMT: it makes the untrusted update check arithmetization-friendly, preserves the shortest of the secure inclusion formats considered, and touches only the frontier affected by the current batch. The next section specifies this construction and its verifier.
+
 \section{Consistency Proof}
 \label{sec:consistency-proof}
 
@@ -432,6 +489,27 @@ The verifier (Algorithm~\ref{alg:stackverify-core}; the complete form is Algorit
   \item \emph{Confinement of opaque subtrees.} If the junction is absent from the pre-state---its old side arises by pass-through or $\varnothing$---then \emph{both} children must carry advice. An opaque $S$ may therefore appear only under pre-existing junctions, whose edges were checked in the round that created them and are frozen by the hashes; wherever a preserved subtree meets a new junction, the prover must present its opened form.
   \item \emph{Digest algebra.} The pre-state digest of a junction follows a four-way rule: if both children existed in the pre-state, the junction existed too and its old digest is recomputed; if exactly one child existed, the junction is new and the old digest of the existing child passes through unchanged; if neither existed, the old digest is the empty marker $\varnothing$. The post-state digest is always recomputed. The pass-through cases are what keep consistency proofs short: no hashing is performed on the parts of the tree that did not change.
 \end{enumerate}
+
+For compactness, write
+\[
+  \mathsf{NodeHash}(d,p,x,y)
+  :=H(\texttt{0x01}\|\langle d\rangle\|\langle p\rangle\|x\|y),
+\]
+and collect the four-way pre-state rule in the helper
+\begin{equation}
+\begin{aligned}
+&\mathsf{HashPreState}(d,p,x,y)\\[-0.25ex]
+&\quad =
+  \begin{cases}
+    \varnothing, & (x,y)=(\varnothing,\varnothing),\\
+    y,           & x=\varnothing,\ y\neq\varnothing,\\
+    x,           & x\neq\varnothing,\ y=\varnothing,\\
+    \mathsf{NodeHash}(d,p,x,y), & x,y\neq\varnothing.
+  \end{cases}
+\end{aligned}
+\label{eq:hash-pre-state}
+\end{equation}
+Thus a newly introduced junction disappears when reconstructing the pre-state, whereas a junction already present in that state is re-hashed.
 
 \begin{algorithm}[t!]
   \caption{Stack-machine verification of the RSMT consistency proof (operand-domain checks omitted)}\label{alg:stackverify-core}
@@ -470,16 +548,8 @@ The verifier (Algorithm~\ref{alg:stackverify-core}; the complete form is Algorit
           \If{$c^{\mathsf o}_l = \varnothing \lor c^{\mathsf o}_r = \varnothing$} \Comment{new junction}
             \State \textbf{assert} $a_l \neq \bot \;\land\; a_r \neq \bot$
           \EndIf
-          \If{$c^{\mathsf o}_l = \varnothing \land c^{\mathsf o}_r = \varnothing$}
-            \State $c^{\mathsf o} \gets \varnothing$
-          \ElsIf{$c^{\mathsf o}_l = \varnothing$}
-            \State $c^{\mathsf o} \gets c^{\mathsf o}_r$ \Comment{pass-through}
-          \ElsIf{$c^{\mathsf o}_r = \varnothing$}
-            \State $c^{\mathsf o} \gets c^{\mathsf o}_l$ \Comment{pass-through}
-          \Else
-            \State $c^{\mathsf o} \gets H(\texttt{0x01} \| \langle d\rangle \| \langle p\rangle \| c^{\mathsf o}_l \| c^{\mathsf o}_r)$
-          \EndIf
-          \State $c^{\mathsf n} \gets H(\texttt{0x01} \| \langle d\rangle \| \langle p\rangle \| c^{\mathsf n}_l \| c^{\mathsf n}_r)$
+          \State $c^{\mathsf o} \gets \Call{HashPreState}{d,p,c^{\mathsf o}_l,c^{\mathsf o}_r}$
+          \State $c^{\mathsf n} \gets \Call{NodeHash}{d,p,c^{\mathsf n}_l,c^{\mathsf n}_r}$
           \State \Call{Push}{$\mathit{st}, (c^{\mathsf o}, c^{\mathsf n}, (d, p))$}
         \Else
           \State \Return $0$ \Comment{unknown opcode}
@@ -494,6 +564,95 @@ The verifier (Algorithm~\ref{alg:stackverify-core}; the complete form is Algorit
 Algorithm~\ref{alg:stackverify-core} omits only the operand-domain assertions ($c \in \{0,1\}^{\lambda}$, $0 \le d < \kappa$, $p \in \{0,1\}^{d}$, $k \in \{0,1\}^{\kappa}$), for readability. The complete verifier, Algorithm~\ref{alg:stackverify} in Appendix~\ref{app:verifier}, includes them; the formal statements refer to it. Verification accepts iff the opcode stream and the batch are both fully consumed, the stack holds exactly one triple, and its digest pair equals $(r_{i-1}, r_i)$; any failed assertion, malformed opcode, stack underflow, or batch overrun rejects. The verifier is a short loop with no recursion and no control flow beyond opcode dispatch---one uniform rule per opcode; its memory use is bounded by the tree depth, and the post-order format makes verification a natural streaming computation. This regularity is deliberate: it is what the AIR arithmetization of Section~\ref{sec:custom-air-circuit} exploits, one trace row per opcode with a fixed constraint family. In-circuit, deriving the junction regions costs nothing extra---the derivation equalities \emph{are} the edge-coherence constraints, and the region limbs appear as hash inputs either way. Relative to the structural fragment of the statement (opcodes $S$, $L$, $N$ and the digest algebra alone), the coherence machinery costs region limbs in the Poseidon2 junction preimage (roughly one additional permutation per junction hash), the bit-prefix comparisons, and the openings ($\approx$ one extra hash per batch element); we estimate the dominant Poseidon2 table grows by a factor of at most $1.5$. The measured throughput of Section~\ref{sec:measured}, which covers the structural fragment, leaves ample headroom above the $10\,000$\,tx/s design target.
 
 For the honest prover, the transcript differs from a bare depth-only encoding only in the openings: one opened junction or leaf per split edge---the node the insertion descends past last. Measured with the reference implementation on a batch of $1\,000$ insertions into a tree of $10^4$ keys, the transcript is within $15\%$ of the size of the depth-only encoding; the derived regions cost nothing on the wire.
+
+
+\subsection{Insertion Example}
+\label{sec:worked-insertion}
+
+Consider the two-leaf pre-state in Figure~\ref{fig:worked-insertion}. The root junction separates $a$ from $b$ at depth $d_2$. A new leaf $c$ is added with key $k_c$; follows the route towards $b$, shares the longer prefix $p_1$ with $k_b$, and diverges from it at depth $d_1$, where $d_2<d_1<\kappa$. Thus $k_a[d_2]=0$, $k_b[d_2]=k_c[d_2]=1$, while $k_b[d_1]=0$ and $k_c[d_1]=1$. Inserting $c=(k_c,v_c)$ splits the edge above $b$: it creates a new leaf and a new junction $N(d_1,p_1)$, but changes no pre-existing leaf hash.
+
+\begin{figure}[htb]
+  \centering
+  \begin{tikzpicture}[
+    diagram,
+    junc/.style={diagram box, minimum width=2.25cm, minimum height=0.75cm},
+    leaf/.style={diagram box, minimum width=2.15cm, minimum height=0.75cm},
+    preserved/.style={fill=blue!7},
+    opened/.style={fill=yellow!18},
+    fresh/.style={fill=green!12},
+    recomputed/.style={fill=orange!12},
+    treeedge/.style={diagram arrow}
+  ]
+    \node[font=\bfseries] at (0,7.2) {Pre-state: $r_{i-1}$};
+    \node[junc, preserved] (oldroot) at (0,6.25) {$N(d_2,p_2)$};
+    \node[leaf, preserved] (olda) at (-1.55,4.8) {Leaf $a$\\$h_a$};
+    \node[leaf, preserved] (oldb) at (1.55,4.8) {Leaf $b$\\$h_b$};
+    \draw[treeedge] (oldroot) -- node[above left] {$0$} (olda);
+    \draw[treeedge] (oldroot) -- node[above right] {$1$} (oldb);
+
+    \node at (0,3.95) {$\Downarrow\ \text{insert }c=(k_c,v_c)$};
+    \node[font=\bfseries] at (0,3.25) {Post-state: $r_i$};
+    \node[junc, recomputed] (newroot) at (0,2.3) {Recomputed node\\$N(d_2,p_2)$};
+    \node[leaf, preserved] (newa) at (-1.75,0.75) {Leaf $a$\\$S(h_a)$};
+    \node[junc, fresh] (newj) at (1.75,0.75) {New node\\$N(d_1,p_1)$};
+    \node[leaf, preserved] (newb) at (0.65,-0.9) {Leaf $b$\\$O_L(k_b,v_b)$};
+    \node[leaf, fresh] (newc) at (2.85,-0.9) {New leaf $c$\\$L$};
+    \draw[treeedge] (newroot) -- node[above left] {$0$} (newa);
+    \draw[treeedge] (newroot) -- node[above right] {$1$} (newj);
+    \draw[treeedge] (newj) -- node[above left] {$0$} (newb);
+    \draw[treeedge] (newj) -- node[above right] {$1$} (newc);
+  \end{tikzpicture}
+  \caption{Inserting $c$ splits the edge above $b$. Leaf $a$ is opaque because it remains below the pre-existing junction $N(d_2,p_2)$. Leaf $b$ must be opened because it becomes a child of the new junction $N(d_1,p_1)$; this supplies the advice needed to check the new edge.}
+  \label{fig:worked-insertion}
+\end{figure}
+
+Let $h_x=H(\texttt{0x00}\|k_x\|v_x)$ for $x\in\{a,b,c\}$ and
+\[
+  h_{N_1}=\mathsf{NodeHash}(d_1,p_1,h_b,h_c).
+\]
+The old and new roots are, respectively,
+\begin{align*}
+  r_{i-1}&=\mathsf{NodeHash}(d_2,p_2,h_a,h_b),\\
+  r_i&=\mathsf{NodeHash}(d_2,p_2,h_a,h_{N_1}).
+\end{align*}
+Post-order traversal gives the five-opcode transcript
+\[
+  \pi=\bigl[S(h_a),\ O_L(k_b,v_b),\ L,\ N(d_1),\ N(d_2)\bigr].
+\]
+The leaf $b$ is an opening rather than an opaque $S$: it meets a junction absent from the pre-state, so confinement requires both children of that junction to carry advice. Leaf $a$ remains opaque because the outer junction existed previously.
+
+Table~\ref{tab:worked-stack} shows the top entry after every opcode; entries below it are unchanged until they are popped. At $N(d_1)$, both children are advised, their regions yield the same $p_1$, and $\mathsf{HashPreState}$ passes through $h_b$. At $N(d_2)$, the left child may be opaque because both old children exist; the advised right child determines $p_2$, and the verifier reconstructs both public roots.
+
+\begin{table}[H]
+\centering
+\caption{Stack-machine verification of the insertion in Figure~\ref{fig:worked-insertion}. Only the top entry after each opcode is shown.}
+\label{tab:worked-stack}
+\footnotesize
+\renewcommand{\arraystretch}{1.18}
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.54\columnwidth}
+                    >{\raggedright\arraybackslash}p{0.34\columnwidth}@{}}
+\toprule
+\textbf{Opcode and computation} & \textbf{Top after} \\
+\midrule
+$S(h_a)$: push opaque subtree
+  & $(h_a,h_a,\bot)$ \\
+$O_L(k_b,v_b)$: recompute $h_b$
+  & $(h_b,h_b,(\kappa,k_b))$ \\
+$L$: consume $(k_c,v_c)$
+  & $(\varnothing,h_c,(\kappa,k_c))$ \\
+$N(d_1)$: derive $p_1$; then
+  $\mathsf{HashPreState}(d_1,p_1,h_b,\varnothing)=h_b$ and
+  $\mathsf{NodeHash}(d_1,p_1,h_b,h_c)=h_{N_1}$
+  & $(h_b,h_{N_1},(d_1,p_1))$ \\
+$N(d_2)$: derive $p_2$; then
+  $\mathsf{HashPreState}(d_2,p_2,h_a,h_b)=r_{i-1}$ and
+  $\mathsf{NodeHash}(d_2,p_2,h_a,h_{N_1})=r_i$
+  & $(r_{i-1},r_i,(d_2,p_2))$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The proof accepts because the transcript and batch are exhausted and the final stack consists of the single entry $(r_{i-1},r_i,(d_2,p_2))$. Its first two fields are compared directly with the certified previous and current roots.
 
 \begin{remark}[Why the region commitment is necessary]
 \label{rem:placement}
@@ -1146,7 +1305,7 @@ Above the per-round proofs sits the aggregation mechanism of Section~\ref{sec:ag
 
 \begin{figure}[!htbp]
     \centering
-\begin{tikzpicture}
+\begin{tikzpicture}[diagram]
 \begin{axis}[
 axis lines = left,
 axis line style={->},
@@ -1230,16 +1389,8 @@ Algorithm~\ref{alg:stackverify} is the complete form of Algorithm~\ref{alg:stack
           \If{$c^{\mathsf o}_l = \varnothing \lor c^{\mathsf o}_r = \varnothing$} \Comment{new junction}
             \State \textbf{assert} $a_l \neq \bot \;\land\; a_r \neq \bot$
           \EndIf
-          \If{$c^{\mathsf o}_l = \varnothing \land c^{\mathsf o}_r = \varnothing$}
-            \State $c^{\mathsf o} \gets \varnothing$
-          \ElsIf{$c^{\mathsf o}_l = \varnothing$}
-            \State $c^{\mathsf o} \gets c^{\mathsf o}_r$ \Comment{pass-through}
-          \ElsIf{$c^{\mathsf o}_r = \varnothing$}
-            \State $c^{\mathsf o} \gets c^{\mathsf o}_l$ \Comment{pass-through}
-          \Else
-            \State $c^{\mathsf o} \gets H(\texttt{0x01} \| \langle d\rangle \| \langle p\rangle \| c^{\mathsf o}_l \| c^{\mathsf o}_r)$
-          \EndIf
-          \State $c^{\mathsf n} \gets H(\texttt{0x01} \| \langle d\rangle \| \langle p\rangle \| c^{\mathsf n}_l \| c^{\mathsf n}_r)$
+          \State $c^{\mathsf o} \gets \Call{HashPreState}{d,p,c^{\mathsf o}_l,c^{\mathsf o}_r}$
+          \State $c^{\mathsf n} \gets \Call{NodeHash}{d,p,c^{\mathsf n}_l,c^{\mathsf n}_r}$
           \State \Call{Push}{$\mathit{st}, (c^{\mathsf o}, c^{\mathsf n}, (d, p))$}
         \Else
           \State \Return $0$ \Comment{unknown opcode}

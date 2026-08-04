@@ -291,8 +291,6 @@ An append-only accumulator starts from the empty partial map $M_0$ and incorpora
 \label{def:append-only-accumulator}
 \end{definition}
 
-In the RSMT instantiation, an inclusion certificate is the hash path from the leaf $(k,v)$ to the root. A non-inclusion certificate follows the key-directed path from the root until the path reaches either a different leaf or a subtree whose region excludes $k$. Definition~\ref{def:query-cert} gives both verifiers, and Theorem~\ref{thm:query} proves the two exactness claims.
-
 After each batch of additions, the new root of the Aggregation Layer's SMT is certified by the BFT Core, ensuring its uniqueness and immutability. This provides a secure trust anchor for all consistency, inclusion, and non-inclusion proofs. The idealized Consensus Layer is modeled as Algorithm~\ref{alg:consensuslayer}.
 
 
@@ -416,7 +414,7 @@ Restricting the in-circuit statement to append-only consistency has several usef
 \section{Design Rationale for the Authenticated Dictionary}
 \label{sec:tree-design}
 
-The authenticated dictionary lies on two critical paths. Users obtain inclusion certificates and store them in the tokens, in many copies, so their size should be optimal --- the limit is one sibling digest per actual branch. The Consensus Layer verifies a consistency proof for every batch and for every shard; the proof should be short, the algorithm efficient and inexpensive to arithmetize. At the same time, the operator is untrusted, so neither compactness nor speed may weaken append-only consistency. These requirements lead to the design below.
+The authenticated dictionary lies on two critical paths. Users obtain inclusion and non-inclusion certificates and store them in the tokens, in many copies, so their size should be optimal --- the limit is one sibling digest per actual branch. The Consensus Layer verifies a consistency proof for every batch and for every shard; the proof should be short, the algorithm efficient and inexpensive to arithmetize. At the same time, the operator is untrusted, so neither compactness nor speed may weaken append-only consistency. These requirements lead to the design below.
 
 \subsection{Indexed and Radix Trees}
 
@@ -426,7 +424,7 @@ Alternative is breadth-first traversal, where the witness is a per-layer array o
 
 A Patricia or radix tree makes path compression part of the committed structure instead. It stores only leaves and  bifurcations, rather than making intractably large tree manageable through optimizations. Hashing the full key with the value anchors each leaf, and committing an internal node to its absolute bifurcation depth makes every existing node immutable when a later insertion splits an edge above it. The touched post-state can then be serialized with three basic instructions: a preserved subtree \(S\), a new leaf \(L\), and a junction \(N\). A stack machine evaluates the same transcript twice, passing preserved hashes through on the old side and constructing the new root on the other. This is a natural shape for tabular AIR arithmetization: the verifier is a single forward scan (passes to compute pre-state and post-state are natural to combine) with bounded stack state and one local rule per instruction.
 
-Path compression also gives compact user proofs. An inclusion certificate needs one sibling hash per junction on the search path and a bitmap (or list) of their depths; on random keys the number of such junctions grows logarithmically with the capacity. But, the extra complexity is that the canonical data-structure construction must be validated by the verifier, specifically the proof must establish that each prover-supplied junction is in the correct key-space region.
+Path compression also gives compact user proofs. A certificate needs one sibling hash per junction on the key-directed path, a bitmap (or list) of their depths, and the leaf at which the path ends; on random keys the number of such junctions grows logarithmically with the capacity. Because key-directed descent is deterministic, the same format serves non-inclusion: the path simply ends at a different leaf. But, the extra complexity is that the canonical data-structure construction must be validated by the verifier, specifically the proof must establish that each prover-supplied junction is in the correct key-space region.
 
 \subsection{Authenticating Placement}
 
@@ -435,7 +433,7 @@ Committing a radix junction only to its two children and bifurcation depth gives
 There are two natural ways to authenticate this missing information. A \emph{range commitment} includes the smallest and largest key below every junction. It lets the verifier authenticate a split using the adjacent child boundaries, but the cost reaches user proofs: each sibling must carry two additional 256-bit keys as well as its digest.\footnote{Experiment: \href{https://github.com/ristik/ndsmt-experiments/blob/main/rsmt4.py}{https://github.com/.../rsmt4.py}}
 A \emph{region commitment} instead includes the junction's absolute key prefix \(p\) alongside its depth \(d\). Whenever an insertion creates an edge, the consistency verifier checks locally that the child is deeper and that its region extends \(p\|0\) or \(p\|1\), according to its side. Old--old edges need not be reopened because the hash freezes checks made in earlier rounds.\footnote{Experiment: \href{https://github.com/ristik/ndsmt-experiments/blob/main/rsmt6.py}{https://github.com/.../rsmt6.py}}
 
-The region is derivable from the queried key during inclusion verification, so it adds no bytes to the inclusion certificate. It need not appear in every \(N\) instruction either: the consistency verifier derives the parent region from authenticated child advice and requires both children to be opened where a new junction meets a preserved subtree. The resulting proof retains the small post-order machine while closing the placement attack.\footnote{Experiment: \href{https://github.com/ristik/ndsmt-experiments/blob/main/rsmt6a.py}{https://github.com/.../rsmt6a.py}}
+The region is derivable from the terminal leaf's key during certificate verification, so it adds no bytes to either inclusion or non-inclusion. It need not appear in every \(N\) instruction either: the consistency verifier derives the parent region from authenticated child advice and requires both children to be opened where a new junction meets a preserved subtree. The resulting proof retains the small post-order machine while closing the placement attack.\footnote{Experiment: \href{https://github.com/ristik/ndsmt-experiments/blob/main/rsmt6a.py}{https://github.com/.../rsmt6a.py}}
 
 \begin{figure*}[t]
     \centering
@@ -472,7 +470,7 @@ Let $H \colon \{0,1\}^{*} \to \{0,1\}^{\lambda}$ be the hash function. A leaf ha
   h_L &= H(\texttt{0x00} \parallel k \parallel v),\\
   h_N &= H(\texttt{0x01} \parallel \langle d\rangle \parallel \langle p\rangle \parallel h_l \parallel h_r).
 \end{align*}
-The region $p \in \{0,1\}^d$ is the key prefix that addresses the node: every key below the junction extends $p$, with $p\|0$ leading left and $p\|1$ leading right; $\langle\cdot\rangle$ are fixed-length injective encodings. A leaf's region is its full key, and its depth is $\kappa = 256$. (We write $\varrho[j]$ for bit $j$ of a region and $\varrho[0..d)$ for its first $d$ bits.) The domain-separation prefixes make leaf and junction hashes disjoint; the depth commitment prevents re-attaching a subtree at a different level; the region commitment pins the node to its key-space position; and fixed child positions prevent swapping. Crucially, depth and region are \emph{absolute} properties of a node---splitting an edge above it changes neither---so inserting new keys never re-hashes any pre-existing node: an insertion creates only new leaf and junction hashes. This immutability of pre-state hashes is what the proof encoding exploits. (The hash function is an instantiation detail: the portable reference implementation uses SHA-256, the AIR a Poseidon2 sponge.) Inclusion proofs transmit only junction depths and sibling digests: the verifier reconstructs the expected region of every junction on the path from the queried key itself, as $k[0..d_j)$.
+The region $p \in \{0,1\}^d$ is the key prefix that addresses the node: every key below the junction extends $p$, with $p\|0$ leading left and $p\|1$ leading right; $\langle\cdot\rangle$ are fixed-length injective encodings. A leaf's region is its full key, and its depth is $\kappa = 256$. (We write $\varrho[j]$ for bit $j$ of a region and $\varrho[0..d)$ for its first $d$ bits.) The domain-separation prefixes make leaf and junction hashes disjoint; the depth commitment prevents re-attaching a subtree at a different level; the region commitment pins the node to its key-space position; and fixed child positions prevent swapping. Crucially, depth and region are \emph{absolute} properties of a node---splitting an edge above it changes neither---so inserting new keys never re-hashes any pre-existing node: an insertion creates only new leaf and junction hashes. This immutability of pre-state hashes is what the proof encoding exploits. (The hash function is an instantiation detail: the portable reference implementation uses SHA-256, the AIR a Poseidon2 sponge.) User-facing certificates transmit only junction depths and sibling digests, plus the leaf at which the path terminates: the verifier reconstructs the expected region of every junction on the path from that leaf's key $k'$, as $k'[0..d_j)$, and binds the path to the target key $k$ by requiring $k[d_j]=k'[d_j]$ at every junction. Inclusion and non-inclusion certificates are the same object, encoded as \texttt{InclusionCertificate} and differentiated by whether the terminal key equals $k$ (Definition~\ref{def:inclusion-cert}).
 
 The consistency proof $\pi$ for round $i$ is the post-order serialization of the \emph{touched} part of the post-state tree, over a five-opcode alphabet:
 \begin{description}[nosep]
@@ -771,85 +769,69 @@ Let $T \neq \varepsilon$ be a tree and $F$ an opening tree with $\mathsf{eval}(F
 Induction on $F$, with the invariant $\mathsf{eval}(F) = \mathsf{dig}(T)$ for the current pair. A hole is assigned the current subtree of $T$. Otherwise, compare the two $H$-preimages. If they differ, they are a collision. If they are equal, the domain-separation tag and the injective encodings force the same constructor with equal components: an $\mathsf{OLeaf}$ meets $\mathsf{Leaf}(k,v)$ with the same $k$ and $v$; an $\mathsf{ONode}$ meets a junction with the same $(d,p)$ and equal child digests, and the induction continues in both children. Clause (d) restates that the recursion covers $F$ and $T$ simultaneously and completely. Each step is one comparison, so the reduction is linear.
 \end{proof}
 
-\subsubsection{Authenticated queries}
+\subsubsection{Inclusion and non-inclusion certificates}
 
-Query certificates concern one committed map and do not depend on how that map was reached. We therefore define and prove them before introducing certified update histories.
+Certificates concern one committed map and do not depend on how that map was reached. We therefore define and prove them before introducing certified update histories.
 
-\begin{definition}[Query certificates]
-\label{def:query-cert}
-An \emph{inclusion certificate} for $(k,v)$ is a possibly empty sequence
+\begin{definition}[Inclusion certificate encoding]
+\label{def:inclusion-cert}
+Inclusion and non-inclusion are certified by one object. Its encoded data-structure name is \texttt{InclusionCertificate}; the name denotes the format, not the relation. A non-empty certificate is a possibly empty sequence of junction openings followed by a terminal leaf,
 \[
-  \gamma=\big((d_1,s_1),\ldots,(d_m,s_m)\big), \qquad m\geq 0.
+  C^\mathsf{inc}=\big((d_1,s_1),\ldots,(d_m,s_m);\ (k',v')\big), \qquad m\geq 0,
 \]
-When $m>0$, the depths satisfy
+with $k'\in\mathcal{K}$, $v'\in\mathcal{V}$ and every $s_j\in\{0,1\}^{\lambda}$. When $m>0$, the depths satisfy
 \[
   \kappa>d_1>\cdots>d_m\geq 0,
 \]
-where every $s_j\in\{0,1\}^{\lambda}$. The order is from the leaf toward the root. To verify $\gamma$ against $r$, set $c_0=H(\texttt{0x00}\|k\|v)$ and, for $j=1,\ldots,m$, compute
+and the order is from the leaf toward the root. There is in addition one distinguished empty certificate $C^\mathsf{inc}_\emptyset$.
+
+To verify $C^\mathsf{inc}$ for a target key $k$ against $r$, set $c_0=H(\texttt{0x00}\|k'\|v')$ and, for $j=1,\ldots,m$, require $k[d_j]=k'[d_j]$ and compute
 \[
 c_j = \begin{cases}
-H(\texttt{0x01}\|\langle d_j\rangle\|\langle p_j\rangle\|c_{j-1}\|s_j) & \text{if } k[d_j] = 0,\\
-H(\texttt{0x01}\|\langle d_j\rangle\|\langle p_j\rangle\|s_j\|c_{j-1}) & \text{if } k[d_j] = 1,
+H(\texttt{0x01}\|\langle d_j\rangle\|\langle p_j\rangle\|c_{j-1}\|s_j) & \text{if } k'[d_j] = 0,\\
+H(\texttt{0x01}\|\langle d_j\rangle\|\langle p_j\rangle\|s_j\|c_{j-1}) & \text{if } k'[d_j] = 1,
 \end{cases}
 \]
-where $p_j=k[0..d_j)$. Accept iff $c_m=r$. When $m=0$, this means accepting iff $c_0=r$.
+where $p_j=k'[0..d_j)$. Accept iff every requirement holds and $c_m=r$; when $m=0$, this means accepting iff $c_0=r$. The empty certificate $C^\mathsf{inc}_\emptyset$ accepts iff $r=\varnothing$. Any unmet requirement rejects.
 
-For later use, $\gamma$ determines an opening tree $F_\gamma$. Start with $F_0=\mathsf{OLeaf}(k,v)$ and wrap it once per pair $(d_j,s_j)$:
+An accepted certificate is an \emph{inclusion certificate} for $(k,v)$ if $(k',v')=(k,v)$, and a \emph{non-inclusion certificate} for $k$ if $k'\neq k$; the empty certificate is a non-inclusion certificate for every $k$. The openings are read identically in both cases, and only the terminal comparison distinguishes them.
+
+The junction regions are reconstructed from the \emph{terminal} key $k'$, instead of the target key $k$: past the recorded key space, the regions on the path are no longer prefixes of $k$, and deriving them from $k$ would fail. The path is tied to $k$ by the per-level requirement $k[d_j]=k'[d_j]$, which shows that the key-directed descent for $k$---at a junction $\mathsf{Node}(d,p,l,r)$, enter the child on side $k[d]$---traverses these openings. Since that descent is deterministic and lands on $\mathsf{Leaf}(k,\cdot)$ whenever $k$ is recorded, reaching any other leaf is a proof of absence.
+
+For later use, $C^\mathsf{inc}$ determines an opening tree $F_{C^\mathsf{inc}}$. Start with $F_0=\mathsf{OLeaf}(k',v')$ and wrap it once per pair $(d_j,s_j)$:
 \[
 F_j=\begin{cases}
-\mathsf{ONode}(d_j,p_j,F_{j-1},\mathsf{Hole}(s_j)) & k[d_j]=0,\\
-\mathsf{ONode}(d_j,p_j,\mathsf{Hole}(s_j),F_{j-1}) & k[d_j]=1.
+\mathsf{ONode}(d_j,p_j,F_{j-1},\mathsf{Hole}(s_j)) & k'[d_j]=0,\\
+\mathsf{ONode}(d_j,p_j,\mathsf{Hole}(s_j),F_{j-1}) & k'[d_j]=1.
 \end{cases}
 \]
-Thus $\mathsf{eval}(F_\gamma)=c_m$, so inclusion verification is exactly the check $\mathsf{eval}(F_\gamma)=r$.
-
-A \emph{non-inclusion certificate} is a list $\eta$ read from the root downward. Its entries are junction openings
-\[
-  J(d,p,c^0,c^1)
-  \quad\text{or opened leaves}\quad
-  E(k',v'),
-\]
-with operands in the domains of Definition~\ref{def:opening}. Verification of $\eta$ for $k$ against $r$ is deterministic:
-\begin{enumerate}[nosep,label=(\roman*)]
-  \item The empty list accepts iff $r=\varnothing$.
-  \item For a nonempty list, set the expected digest to $q=r$ and read entries from left to right. Junction depths must strictly increase.
-  \item At $J(d,p,c^0,c^1)$, require
-  \[
-    q=H(\texttt{0x01}\|\langle d\rangle\|\langle p\rangle\|c^0\|c^1).
-  \]
-  If $p\not\preceq k$, accept iff this is the final entry. If $p\preceq k$, require $p=k[0..d)$ and another entry, set $q=c^{k[d]}$, and continue.
-  \item At $E(k',v')$, accept iff this is the final entry,
-  $q=H(\texttt{0x00}\|k'\|v')$, and $k'\neq k$.
-\end{enumerate}
-Any unmet requirement rejects.
-
-Every accepted nonempty $\eta$ determines an opening tree $F_\eta$. The final entry becomes either $\mathsf{OLeaf}(k',v')$ or an $\mathsf{ONode}$ with two holes. Working backward, replace the $k[d]$-side hole of each preceding junction by the opening already constructed and leave its other child as a hole. The digest checks above give $\mathsf{eval}(F_\eta)=r$.
+Thus $\mathsf{eval}(F_{C^\mathsf{inc}})=c_m$, so the digest part of verification is exactly the check $\mathsf{eval}(F_{C^\mathsf{inc}})=r$.
 \end{definition}
 
-\begin{theorem}[Query correctness]
-\label{thm:query}
+\begin{theorem}[Certificate correctness]
+\label{thm:inclusion-cert}
 Let $M$ be a finite partial map, $T=\mathsf{Tree}(M)$, and $r=\mathsf{dig}(T)$.
 \begin{enumerate}[nosep,label=(\roman*)]
-  \item An inclusion certificate for $(k,v)$ verifies against $r$ only if $M(k)=v$; if $M(k)=v$, the leaf-to-root path in $T$ gives a verifying inclusion certificate.
-  \item A non-inclusion certificate for $k$ verifies against $r$ only if $k\notin\mathrm{dom}(M)$; if $k\notin\mathrm{dom}(M)$, key-directed descent in $T$ gives a verifying non-inclusion certificate.
+  \item Let a certificate verify for $k$ against $r$. If it is empty, then $M$ is empty. Otherwise, if its terminal is $(k',v')$, then $M(k')=v'$; consequently it certifies $M(k)=v'$ when $k'=k$, and $k\notin\mathrm{dom}(M)$ when $k'\neq k$.
+  \item If $M(k)=v$, the leaf-to-root path of $\mathsf{Leaf}(k,v)$ in $T$ gives a verifying inclusion certificate for $(k,v)$. If $k\notin\mathrm{dom}(M)$, key-directed descent in $T$ gives a verifying non-inclusion certificate for $k$; for $T=\varepsilon$ this is the empty certificate.
 \end{enumerate}
 Both certificates contain at most $\kappa$ junction openings and are constructed in time linear in the path length.
 \end{theorem}
 \begin{proof}
-(i) Let $\gamma$ verify. Its opening tree satisfies $\mathsf{eval}(F_\gamma)=r$. Since an opening tree evaluates to an $H$-image, $r\neq\varnothing$ and $T\neq\varepsilon$. Lemma~\ref{lem:match} places the terminal $\mathsf{OLeaf}(k,v)$ at the corresponding leaf of $T$, so $M(k)=v$.
+(i) The empty certificate verifies only when $r=\varnothing$, which means $T=\varepsilon$ and $\mathrm{dom}(M)=\emptyset$, so the absence claim holds. Let $C^\mathsf{inc}$ be nonempty and verify. Its opening tree satisfies $\mathsf{eval}(F_{C^\mathsf{inc}})=r$; since an opening tree evaluates to an $H$-image, $r\neq\varnothing$ and $T\neq\varepsilon$. Lemma~\ref{lem:match} places the terminal $\mathsf{OLeaf}(k',v')$ at the corresponding leaf of $T$, giving $M(k')=v'$, and places every $\mathsf{ONode}(d_j,p_j,\cdot,\cdot)$ at the junction of $T$ at the same position. The openings are therefore exactly the ancestors of $\mathsf{Leaf}(k',v')$, at depths $d_j$, and the path descends on side $k'[d_j]$ at each.
 
-Conversely, suppose $M(k)=v$. Starting at $\mathsf{Leaf}(k,v)$, list its ancestors toward the root. For each ancestor record its depth and the digest of the sibling subtree. Depths strictly decrease in this leaf-to-root order, Lemma~\ref{lem:shape}(ii) gives the region $k[0..d)$, and the side is $k[d]$. The verifier therefore recomputes the digest of each ancestor and ends at $r$. A singleton tree gives the empty certificate.
+Suppose $k\in\mathrm{dom}(M)$. Every ancestor $\mathsf{Node}(d,p,l,r)$ of $\mathsf{Leaf}(k,M(k))$ has $p\preceq k$ by Lemma~\ref{lem:shape}(i), and the child holding that leaf has region a prefix of $k$; validity then forces that child to be the one on side $k[d]$. Hence key-directed descent for $k$ ends at $\mathsf{Leaf}(k,M(k))$. The requirement $k[d_j]=k'[d_j]$ makes that same descent traverse the openings, so it ends at $\mathsf{Leaf}(k',v')$. Descent is deterministic, so $k'=k$. Contrapositively, $k'\neq k$ gives $k\notin\mathrm{dom}(M)$.
 
-(ii) The empty certificate verifies only when $r=\varnothing$, which means $T=\varepsilon$ and the key is absent. Now let a nonempty $\eta$ verify. Its opening tree satisfies $\mathsf{eval}(F_\eta)=r$, so Lemma~\ref{lem:match} places the entire opened path in $T$. Suppose for contradiction that $T$ contains the leaf for $k$. At every nonterminal junction, the certificate requires the junction region to be a prefix of $k$ and continues through side $k[d]$. The matched path therefore remains on the unique path to that leaf. Its terminal cannot be a junction whose region excludes $k$, because every ancestor region is a prefix of $k$ by Lemma~\ref{lem:shape}(i); and it cannot be a leaf with a different key. This contradicts the verifier's terminal check.
+(ii) Suppose $M(k)=v$. Starting at $\mathsf{Leaf}(k,v)$, list its ancestors toward the root, recording for each its depth and the digest of the sibling subtree, and take $(k,v)$ as the terminal. Depths strictly decrease in this leaf-to-root order, Lemma~\ref{lem:shape}(ii) gives the region $k[0..d)$, and the side is $k[d]$; with $k'=k$ the requirement $k[d_j]=k'[d_j]$ is trivial. The verifier therefore recomputes the digest of each ancestor and ends at $r$. A singleton tree gives $m=0$.
 
-Conversely, suppose $k$ is absent. If $T=\varepsilon$, use the empty certificate. Otherwise open the root and descend while the current junction region is a prefix of $k$, following side $k[d]$. Stop and open the first junction whose region is not a prefix of $k$, or the first leaf. The descent is finite because junction depths strictly increase. The terminal leaf cannot have key $k$, and the recorded openings satisfy every digest, path, and terminal check of Definition~\ref{def:query-cert}.
+Suppose $k$ is absent. If $T=\varepsilon$, use the empty certificate. Otherwise follow the key-directed descent for $k$ to the leaf $\mathsf{Leaf}(k',v')$ at which it arrives, and record the same data. The descent is finite because junction depths strictly increase, and every node it passes is an ancestor of that leaf, so the recorded openings satisfy every digest check; the sides it takes are $k[d_j]$, and they are the path's own sides $k'[d_j]$, so the per-level requirement holds. Finally $k'\neq k$, since otherwise $k\in\mathrm{dom}(M)$.
 
 A valid root-to-leaf path has strictly increasing depths in $\{0,\ldots,\kappa\}$, which gives the size bound; both constructions visit each path node once.
 \end{proof}
 
 \subsubsection{Certified histories}
 
-We now turn from queries against one root to the sequence of roots accepted by the consistency verifier.
+We now turn from certificates against one root to the sequence of roots accepted by the consistency verifier.
 
 \begin{definition}[Certified history; append-only consistency]
 \label{def:aoc}
@@ -864,7 +846,7 @@ identifying a batch with its induced partial map. The history is \emph{append-on
 Thus definedness requires every batch to have pairwise distinct keys absent from all earlier batches. By Proposition~\ref{prop:unique}, this definition is equivalent to the existence of valid state trees with the previous round-by-round map-extension property.
 \end{definition}
 
-Definition~\ref{def:aoc} is the formal counterpart of clause~(i) in Definition~\ref{def:append-only-accumulator}; Theorem~\ref{thm:query} gives clauses~(ii) and~(iii) for every canonical state tree. Theorem~\ref{thm:history} links those trees to the roots of a certified history. Definition~\ref{def:aoc} also subsumes prior-state preservation~\eqref{eq:psp}, with the committed maps of Section~\ref{sec:scope} realized as the cumulative maps $M_i$.
+Definition~\ref{def:aoc} is the formal counterpart of clause~(i) in Definition~\ref{def:append-only-accumulator}; Theorem~\ref{thm:inclusion-cert} gives clauses~(ii) and~(iii) for every canonical state tree. Theorem~\ref{thm:history} links those trees to the roots of a certified history. Definition~\ref{def:aoc} also subsumes prior-state preservation~\eqref{eq:psp}, with the committed maps of Section~\ref{sec:scope} realized as the cumulative maps $M_i$.
 
 \subsection{Certified Update Security}
 \label{sec:consistency-theorem}
@@ -1033,7 +1015,7 @@ Thus the disjoint union defining $M_i$ exists, and Proposition~\ref{prop:unique}
 In a certified history, verifying inclusion certificates for $(k, v)$ against $r_i$ and for $(k, v')$ against $r_j$ imply $v = v'$.
 \end{corollary}
 \begin{proof}
-Apply Theorem~\ref{thm:history}; if it produces a collision, we are done. Otherwise, without loss of generality let $i\leq j$. Then $r_i=\mathsf{dig}(\mathsf{Tree}(M_i))$ and $r_j=\mathsf{dig}(\mathsf{Tree}(M_j))$. Theorem~\ref{thm:query}(i) gives $M_i(k)=v$ and $M_j(k)=v'$. Since $M_i\subseteq M_j$, the two values are equal.
+Apply Theorem~\ref{thm:history}; if it produces a collision, we are done. Otherwise, without loss of generality let $i\leq j$. Then $r_i=\mathsf{dig}(\mathsf{Tree}(M_i))$ and $r_j=\mathsf{dig}(\mathsf{Tree}(M_j))$. Theorem~\ref{thm:inclusion-cert}(i) gives $M_i(k)=v$ and $M_j(k)=v'$. Since $M_i\subseteq M_j$, the two values are equal.
 \end{proof}
 
 \begin{corollary}[No out-of-batch bindings]
@@ -1045,15 +1027,15 @@ In a certified history, if an inclusion certificate for $(k,v)$ verifies against
 Here the $B_j$ are the consistency proof's witness batches. The claim does not assert that every witness binding came from an authenticated user request.
 \end{corollary}
 \begin{proof}
-Apply Theorem~\ref{thm:history}. Unless it produces a collision, $M_i=B_1\uplus\cdots\uplus B_i$ and $r_i=\mathsf{dig}(\mathsf{Tree}(M_i))$; Theorem~\ref{thm:query}(i) gives the result.
+Apply Theorem~\ref{thm:history}. Unless it produces a collision, $M_i=B_1\uplus\cdots\uplus B_i$ and $r_i=\mathsf{dig}(\mathsf{Tree}(M_i))$; Theorem~\ref{thm:inclusion-cert}(i) gives the result.
 \end{proof}
 
 \begin{corollary}[No false non-inclusion]
 \label{cor:noninc}
-In a certified history, a verifying inclusion certificate for $(k,v)$ against $r_i$ and a verifying non-inclusion certificate for $k$ against $r_j$, where $j\geq i$, together yield a collision.
+In a certified history, let two certificates for the same target key $k$ verify against $r_i$ and $r_j$ with $j\geq i$, the first with terminal key $k$ and the second with terminal key $k'\neq k$. Then a collision is computable from the two certificates and the transcript.
 \end{corollary}
 \begin{proof}
-Apply Theorem~\ref{thm:history}; if it produces a collision, we are done. Otherwise the certified roots are the digests of $\mathsf{Tree}(M_i)$ and $\mathsf{Tree}(M_j)$. Theorem~\ref{thm:query} gives
+Apply Theorem~\ref{thm:history}; if it produces a collision, we are done. Otherwise the certified roots are the digests of $\mathsf{Tree}(M_i)$ and $\mathsf{Tree}(M_j)$. Theorem~\ref{thm:inclusion-cert}(i) gives
 \[
   k\in\mathrm{dom}(M_i)\subseteq\mathrm{dom}(M_j)
   \quad\text{and}\quad
@@ -1062,16 +1044,24 @@ Apply Theorem~\ref{thm:history}; if it produces a collision, we are done. Otherw
 a contradiction. Thus one of the reductions produces a collision.
 \end{proof}
 
-\begin{corollary}[Certified query service]
+Because the two relations use one certificate object, this says that the terminal key of an accepted certificate for $k$ is monotone along a certified history: once some accepted certificate for $k$ terminates at $k$, no later root admits one that terminates elsewhere, short of a collision.
+
+\begin{corollary}[Certified inclusion/non-inclusion service]
 \label{cor:service}
-For every root $r_i$ of a certified history, $(k,v)$ admits a verifying inclusion certificate exactly when $M_i(k)=v$, and $k$ admits a verifying non-inclusion certificate exactly when $k\notin\mathrm{dom}(M_i)$. Given $\mathsf{Tree}(M_i)$, the corresponding certificates are obtained in time linear in their path length.
+Let $r_i$ be a root of a certified history.
+\begin{enumerate}[nosep,label=(\roman*)]
+  \item Given $\mathsf{Tree}(M_i)$, one certificate for $k$ verifying against $r_i$ is constructed in time linear in its path length. Its terminal key is $k$ when $k\in\mathrm{dom}(M_i)$ and differs from $k$ otherwise, so a single walk of the tree certifies either relation.
+  \item From any certificate that verifies against $r_i$, the statement it certifies about $M_i$ follows.
+\end{enumerate}
 \end{corollary}
 \begin{proof}
-Apply Theorem~\ref{thm:history}; unless it produces a collision, $r_i=\mathsf{dig}(\mathsf{Tree}(M_i))$. The claims are then exactly Theorem~\ref{thm:query}, including its construction and time bounds.
+Apply Theorem~\ref{thm:history}; unless it produces a collision, $r_i=\mathsf{dig}(\mathsf{Tree}(M_i))$. The claims are then Theorem~\ref{thm:inclusion-cert}(ii) and~(i) respectively, including its construction and time bounds.
 \end{proof}
 
+Clause~(ii) is stated over a certificate that has been supplied, not over the set of strings that would verify. The stronger reading---that no verifying certificate for a recorded key \emph{exists}---does not follow from collision resistance: such a certificate is an encoded collision, and the assumption is that collisions cannot be found, not that they are absent.
+
 \begin{remark}
-Theorem~\ref{thm:query} establishes soundness and completeness of authenticated queries. Theorems~\ref{thm:round} and~\ref{thm:complete} do the same for each transition, while Theorem~\ref{thm:history} and Corollaries~\ref{cor:unicity}, \ref{cor:batchbound}, \ref{cor:noninc}, and~\ref{cor:service} lift the results to certified histories. Together they establish the accumulator interface of Definition~\ref{def:append-only-accumulator}. The core arguments use structural induction over trees, opening trees, or proof terms, with recursively defined attributes and explicit collision extraction; query correctness reduces directly to Matching and canonical path construction. The consistency algorithm appears only in Lemma~\ref{lem:parse}; a re-arithmetization of that verifier, such as the AIR of Section~\ref{sec:custom-air-circuit}, only needs to be proven equivalent to Algorithm~\ref{alg:stackverify}, and the rest of the argument carries over unchanged.
+Theorem~\ref{thm:inclusion-cert} establishes soundness and completeness of inclusion and non-inclusion certificates. Theorems~\ref{thm:round} and~\ref{thm:complete} do the same for each transition, while Theorem~\ref{thm:history} and Corollaries~\ref{cor:unicity}, \ref{cor:batchbound}, \ref{cor:noninc}, and~\ref{cor:service} lift the results to certified histories. Together they establish the accumulator interface of Definition~\ref{def:append-only-accumulator}. The core arguments use structural induction over trees, opening trees, or proof terms, with recursively defined attributes and explicit collision extraction; certificate correctness reduces directly to Matching and canonical path construction. The consistency algorithm appears only in Lemma~\ref{lem:parse}; a re-arithmetization of that verifier, such as the AIR of Section~\ref{sec:custom-air-circuit}, only needs to be proven equivalent to Algorithm~\ref{alg:stackverify}, and the rest of the argument carries over unchanged.
 \end{remark}
 
 

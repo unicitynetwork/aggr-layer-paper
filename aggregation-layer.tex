@@ -1,4 +1,4 @@
-\documentclass[twocolumn]{article}
+\documentclass[11pt]{article}
 
 \usepackage{graphicx}
 \usepackage{amsmath}
@@ -17,7 +17,7 @@
 \usepackage{pgfplots}
 \pgfplotsset{compat=1.18}
 
-%\usepackage[margin=0.75in]{geometry}
+\usepackage[margin=1in]{geometry}
 \usepackage{authblk}
 \usepackage{url}
 \usepackage{hyperref}
@@ -65,8 +65,10 @@
 \title{Unicity Infrastructure:\\
     the Aggregation Layer}
 
-\author[1]{Risto Laanoja}
-\affil[1]{Unicity Labs}
+\author[1]{Ahto Buldas}
+\author[2]{Risto Laanoja}
+\affil[1]{Tallinn University of Technology}
+\affil[2]{Unicity Labs}
 
 \date{\today}
 
@@ -75,7 +77,7 @@
 \maketitle
 
 \begin{abstract}
-Unicity is a novel blockchain protocol with the ambitious goal of enabling peer-to-peer token transactions to occur off-chain, without shared ordering and execution overhead. This premise requires supporting infrastructure to guarantee that there are no parallel states of assets, or more specifically, that there is no double-spending; a property we term the \textit{unicity}. It turns out that the lack of globally shared state and ordering reduces the blockchain overhead considerably. In designing this infrastructure, no compromises were made regarding its trust assumptions. This paper details the design of the Aggregation Layer, the component responsible for producing Proofs of Inclusion and Non-inclusion to the users. We analyze its design for efficiency and evaluate the robustness of its trust and security model, and design optimal data structures and algorithms for this setup. We then identify the critical property that the Consensus Layer must verify on each round---\emph{append-only consistency}, combining prior-state preservation with coherent placement of insertions---give it a formal definition, and prove that the RSMT consistency proof enforces it over the entire certified history, assuming only collision resistance of the hash function. The complete consistency verifier, including coherent key placement, is implemented~\cite{rsmtair} as an Algebraic Intermediate Representation (AIR) circuit on top of the Plonky3~\cite{plonky3} STARK toolkit. The implementation sustains a proving throughput in excess of $10\,000$ insertions per second on a single consumer-class CPU, with a succinct proof and tens of milliseconds verification time, and no trusted setup. Finally, we describe how the per-round proofs of all shards, together with the Consensus Layer's state transitions, are folded into a single recursively aggregated STARK: a fixed-size certificate of the correctness of the system's entire operating history, verifiable against the genesis configuration alone, without trusting the validator set.
+Unicity is a novel blockchain protocol with the ambitious goal of enabling peer-to-peer token transactions to occur off-chain, without shared ordering and execution overhead. This premise requires supporting infrastructure to guarantee that there are no parallel states of assets, or more specifically, that there is no double-spending; a property we term the \textit{unicity}. It turns out that the lack of globally shared state and ordering reduces the blockchain overhead considerably. In designing this infrastructure, no compromises were made regarding its trust assumptions. This paper details the design of the Aggregation Layer, the component responsible for producing Proofs of Inclusion and Non-inclusion to the users. We analyze its design for efficiency and evaluate the robustness of its trust and security model, and design optimal data structures and algorithms for this setup. We then identify the critical property that the Consensus Layer must verify on each round---\emph{append-only consistency}, combining prior-state preservation with coherent placement of insertions---give it a formal definition, and prove that the RSMT consistency proof enforces it over the entire certified history, assuming only collision resistance of the hash function. The security argument is layered: a self-contained single-insertion theory, in which each update is driven by a non-inclusion certificate and the post-state is computed rather than supplied by the untrusted operator, is extended to the batch-optimized transcript, which imports the shape of the touched tree from the operator and pays for its compression with explicitly checked coherent placement. The complete consistency verifier, including coherent key placement, is implemented~\cite{rsmtair} as an Algebraic Intermediate Representation (AIR) circuit on top of the Plonky3~\cite{plonky3} STARK toolkit. The implementation sustains a proving throughput in excess of $10\,000$ insertions per second on a single consumer-class CPU, with a succinct proof and tens of milliseconds verification time, and no trusted setup. Finally, we describe how the per-round proofs of all shards, together with the Consensus Layer's state transitions, are folded into a single recursively aggregated STARK: a fixed-size certificate of the correctness of the system's entire operating history, verifiable against the genesis configuration alone, without trusting the validator set.
 \end{abstract}
 
 
@@ -87,7 +89,7 @@ In a hierarchical trustless system, the principle is that the base layer (e.g., 
 
 To scale further, we use succinct cryptographic proofs to compress the consistency proofs. This use-case is fundamentally more efficient than proving the transaction data itself, as is done in many privacy coins and ZK-rollups: the statement being proved is a single tree update, with the batch as non-public witness data, not the whole execution trace of a virtual machine. The implemented STARK does not claim witness confidentiality.
 
-A useful scoping observation is that the consensus-relevant statement is narrower than ``the SMT was updated correctly''. The Consensus Layer needs to be convinced that \emph{no previously-recorded leaf was deleted or modified} and that \emph{every new leaf is placed coherently with its key}; Remark~\ref{rem:placement} shows, by a concrete attack, that the second half cannot be dropped. Request liveness, submitted-request accountability, and exclusion of unauthorized inserts are self-policed by the protocol layer around the public root commitment: their violation only damages the dishonest aggregator's own ability to serve users, a denial of service by an operationally replaceable component. Section~\ref{sec:scope} details this scoping argument, and Section~\ref{sec:consistency-formal} proves that the resulting statement is sufficient. The narrowness of the in-circuit statement is what makes the AIR small and the proving cheap.
+A useful scoping observation is that the consensus-relevant statement is narrower than ``the SMT was updated correctly''. The Consensus Layer needs to be convinced that \emph{no previously-recorded leaf was deleted or modified} and that \emph{every new leaf is placed coherently with its key}; Remark~\ref{rem:placement} shows, by a concrete attack, that the second half cannot be dropped. Request liveness, submitted-request accountability, and exclusion of unauthorized inserts are self-policed by the protocol layer around the public root commitment: their violation only damages the dishonest aggregator's own ability to serve users, a denial of service by an operationally replaceable component. Section~\ref{sec:scope} details this scoping argument, and Sections~\ref{sec:single-key} and~\ref{sec:consistency-theorem} prove that the resulting statement is sufficient. The narrowness of the in-circuit statement is what makes the AIR small and the proving cheap.
 
 In this paper, we show how to scale the Aggregation Layer to $10\,000$ tx/s \emph{per shard} and beyond. This figure was the original design target; the measured proving throughput of our reference implementation exceeds it by roughly $3\times$ on a single consumer-class CPU (Section~\ref{sec:custom-air-circuit}). Shards process disjoint key ranges and prove their state transitions independently, so aggregate transaction capacity is the sum of their capacities. The BFT Core receives one succinct transition proof per advancing shard rather than one item per transaction; Section~\ref{sec:sharding-architecture} makes this scaling boundary precise.
 
@@ -433,7 +435,7 @@ Committing a radix junction only to its two children and bifurcation depth gives
 There are two natural ways to authenticate this missing information. A \emph{range commitment} includes the smallest and largest key below every junction. It lets the verifier authenticate a split using the adjacent child boundaries, but the cost reaches user proofs: each sibling must carry two additional 256-bit keys as well as its digest.\footnote{Experiment: \href{https://github.com/ristik/ndsmt-experiments/blob/main/rsmt4.py}{https://github.com/.../rsmt4.py}}
 A \emph{region commitment} instead includes the junction's absolute key prefix \(p\) alongside its depth \(d\). Whenever an insertion creates an edge, the consistency verifier checks locally that the child is deeper and that its region extends \(p\|0\) or \(p\|1\), according to its side. Old--old edges need not be reopened because the hash freezes checks made in earlier rounds.\footnote{Experiment: \href{https://github.com/ristik/ndsmt-experiments/blob/main/rsmt6.py}{https://github.com/.../rsmt6.py}}
 
-The region is derivable from the terminal leaf's key during certificate verification, so it adds no bytes to either inclusion or non-inclusion. It need not appear in every \(N\) instruction either: the consistency verifier derives the parent region from authenticated child advice and requires both children to be opened where a new junction meets a preserved subtree. The resulting proof retains the small post-order machine while closing the placement attack.\footnote{Experiment: \href{https://github.com/ristik/ndsmt-experiments/blob/main/rsmt6a.py}{https://github.com/.../rsmt6a.py}}
+The region is derivable from the terminal leaf's key during certificate verification, so it adds no bytes to either inclusion or non-inclusion. It need not appear in every \(N\) instruction either: the consistency verifier derives the parent region from authenticated child advice and requires both children to be opened where a new junction meets a preserved subtree. The resulting proof retains the small post-order machine while closing the placement attack.\footnote{Experiment: \href{https://github.com/ristik/ndsmt-experiments/blob/main/rsmt6a.py}{https://github.com/.../rsmt6a.py}} Formally, the region commitment is load-bearing only for the transcript-based consistency proof: certificate verification and the single-insertion update protocol never check it (Remark~\ref{rem:derived-vs-checked}).
 
 \begin{figure*}[t]
     \centering
@@ -444,7 +446,7 @@ The region is derivable from the terminal leaf's key during certificate verifica
 
 \begin{figure}[t]
     \centering
-    \includegraphics[width=\columnwidth]{figures/tree_design_inclusion.pdf}
+    \includegraphics[width=.5 \textwidth]{figures/tree_design_inclusion.pdf}
     \caption{Median inclusion-certificate size, sampled over 32 inserted keys per round in the workload of Figure~\ref{fig:tree-design-consistency}. The region commitment preserves the compact depth-only format; authenticated ranges enlarge every sibling operand.}
     \label{fig:tree-design-inclusion}
 \end{figure}
@@ -458,7 +460,7 @@ Figures~\ref{fig:tree-design-consistency} and~\ref{fig:tree-design-inclusion} sh
 
 A \emph{consistency proof} is a cryptographic construction that validates one round of operation of the append-only accumulator. Round $i$ inserts the batch $B_i = ((k_1, v_1), \ldots, (k_j, v_j))$ of key--value pairs into the tree; the root digest before the round is $r_{i-1}$, and after the round it is $r_i$. The consistency proof $\pi_i$ is a transcript of the part of the tree touched by the insertions. The Consensus Layer verifies $(\pi_i, r_{i-1}, r_i)$ before certifying $r_i$ (Algorithm~\ref{alg:consensuslayer}).
 
-The property that verification enforces is \emph{append-only consistency} (Definition~\ref{def:minimal}; formally Definition~\ref{def:aoc}): every binding recorded under $r_{i-1}$ is recorded unchanged under $r_i$, and every new leaf sits at the position determined by its own key. Section~\ref{sec:stack-verifier} specifies the tree, the proof encoding, and the verifier; Section~\ref{sec:consistency-formal} develops the formal model; Section~\ref{sec:consistency-theorem} proves soundness and completeness, assuming only collision resistance of the hash function.
+The property that verification enforces is \emph{append-only consistency} (Definition~\ref{def:minimal}; formally Definition~\ref{def:aoc}): every binding recorded under $r_{i-1}$ is recorded unchanged under $r_i$, and every new leaf sits at the position determined by its own key. Section~\ref{sec:stack-verifier} specifies the tree, the proof encoding, and the verifier; Section~\ref{sec:consistency-formal} develops the formal model of trees and certificates; Section~\ref{sec:single-key} first settles the single-insertion case, in which a non-inclusion certificate alone drives the update; Section~\ref{sec:consistency-theorem} then proves soundness and completeness of the batched form, assuming only collision resistance of the hash function.
 
 \subsection{The Region-Committing Tree and Its Verifier}
 \label{sec:stack-verifier}
@@ -470,7 +472,7 @@ Let $H \colon \{0,1\}^{*} \to \{0,1\}^{\lambda}$ be the hash function. A leaf ha
   h_L &= H(\texttt{0x00} \parallel k \parallel v),\\
   h_N &= H(\texttt{0x01} \parallel \langle d\rangle \parallel \langle p\rangle \parallel h_l \parallel h_r).
 \end{align*}
-The region $p \in \{0,1\}^d$ is the key prefix that addresses the node: every key below the junction extends $p$, with $p\|0$ leading left and $p\|1$ leading right; $\langle\cdot\rangle$ are fixed-length injective encodings. A leaf's region is its full key, and its depth is $\kappa = 256$. (We write $\varrho[j]$ for bit $j$ of a region and $\varrho[0..d)$ for its first $d$ bits.) The domain-separation prefixes make leaf and junction hashes disjoint; the depth commitment prevents re-attaching a subtree at a different level; the region commitment pins the node to its key-space position; and fixed child positions prevent swapping. Crucially, depth and region are \emph{absolute} properties of a node---splitting an edge above it changes neither---so inserting new keys never re-hashes any pre-existing node: an insertion creates only new leaf and junction hashes. This immutability of pre-state hashes is what the proof encoding exploits. (The hash function is an instantiation detail: the portable reference implementation uses SHA-256, the AIR a Poseidon2 sponge.) User-facing certificates transmit only junction depths and sibling digests, plus the leaf at which the path terminates: the verifier reconstructs the expected region of every junction on the path from that leaf's key $k'$, as $k'[0..d_j)$, and binds the path to the target key $k$ by requiring $k[d_j]=k'[d_j]$ at every junction. Inclusion and non-inclusion certificates are the same object, encoded as \texttt{InclusionCertificate} and differentiated by whether the terminal key equals $k$ (Definition~\ref{def:inclusion-cert}).
+The region $p \in \{0,1\}^d$ is the key prefix that addresses the node: every key below the junction extends $p$, with $p\|0$ leading left and $p\|1$ leading right; $\langle\cdot\rangle$ are fixed-length injective encodings. A leaf's region is its full key, and its depth is $\kappa = 256$. (We write $\varrho[j]$ for bit $j$ of a region and $\varrho[0..d)$ for its first $d$ bits.) The domain-separation prefixes make leaf and junction hashes disjoint; the depth commitment prevents re-attaching a subtree at a different level; the region commitment pins the node to its key-space position; and fixed child positions prevent swapping. Crucially, depth and region are \emph{absolute} properties of a node---splitting an edge above it changes neither---so inserting new keys never re-hashes any pre-existing node: an insertion creates only new leaf and junction hashes. This immutability of pre-state hashes is what the proof encoding exploits. (The hash function is an instantiation detail: the portable reference implementation uses SHA-256, the AIR a Poseidon2 sponge.) User-facing certificates transmit only junction depths and sibling digests, plus the leaf at which the path terminates: the verifier reconstructs the expected region of every junction on the path from that leaf's key $k'$, as $k'[0..d_j)$, and binds the path to the target key $k$ by requiring $k[d_j]=k'[d_j]$ at every junction. Inclusion and non-inclusion certificates are the same object, encoded as \texttt{InclusionCertificate} and differentiated by whether the terminal key equals $k$ (Definition~\ref{def:inclusion-cert}). Read a second time, a non-inclusion certificate also determines the root that results from inserting $k$, which makes it a single-insertion consistency proof in its own right (Section~\ref{sec:single-key}).
 
 The consistency proof $\pi$ for round $i$ is the post-order serialization of the \emph{touched} part of the post-state tree, over a five-opcode alphabet:
 \begin{description}[nosep]
@@ -511,7 +513,7 @@ Thus a newly introduced junction disappears when reconstructing the pre-state, w
 
 \begin{algorithm}[t!]
   \caption{Stack-machine verification of the RSMT consistency proof (operand-domain checks omitted)}\label{alg:stackverify-core}
-  \footnotesize
+  %\footnotesize  % to fit to 1 column
   \begin{algorithmic}[0]
     \Function{VerifyConsistency}{$\pi, r_{i-1}, r_i, B$}
       \If{$B = [\,]$}
@@ -581,20 +583,25 @@ Consider the two-leaf pre-state in Figure~\ref{fig:worked-insertion}. The root j
     recomputed/.style={fill=orange!12},
     treeedge/.style={diagram arrow}
   ]
-    \node[font=\bfseries] at (0,7.2) {Pre-state: $r_{i-1}$};
-    \node[junc, preserved] (oldroot) at (0,6.25) {$N(d_2,p_2)$};
-    \node[leaf, preserved] (olda) at (-1.55,4.8) {Leaf $a$\\$h_a$};
-    \node[leaf, preserved] (oldb) at (1.55,4.8) {Leaf $b$\\$h_b$};
+    % ---------- Pre-state (left) ----------
+    \node[font=\bfseries] at (0,5.6) {Pre-state: $r_{i-1}$};
+    \node[junc, preserved] (oldroot) at (0,4.5) {$N(d_2,p_2)$};
+    \node[leaf, preserved] (olda) at (-1.55,3.0) {Leaf $a$\\$h_a$};
+    \node[leaf, preserved] (oldb) at (1.55,3.0) {Leaf $b$\\$h_b$};
     \draw[treeedge] (oldroot) -- node[above left] {$0$} (olda);
     \draw[treeedge] (oldroot) -- node[above right] {$1$} (oldb);
 
-    \node at (0,3.95) {$\Downarrow\ \text{insert }c=(k_c,v_c)$};
-    \node[font=\bfseries] at (0,3.25) {Post-state: $r_i$};
-    \node[junc, recomputed] (newroot) at (0,2.3) {Recomputed node\\$N(d_2,p_2)$};
-    \node[leaf, preserved] (newa) at (-1.75,0.75) {Leaf $a$\\$S(h_a)$};
-    \node[junc, fresh] (newj) at (1.75,0.75) {New node\\$N(d_1,p_1)$};
-    \node[leaf, preserved] (newb) at (0.65,-0.9) {Leaf $b$\\$O_L(k_b,v_b)$};
-    \node[leaf, fresh] (newc) at (2.85,-0.9) {New leaf $c$\\$L$};
+    % ---------- Transition arrow ----------
+    \node at (4.4,4.0) {$\Rightarrow$};
+    \node[align=center] at (4.4,3.4) {insert\\$c=(k_c,v_c)$};
+
+    % ---------- Post-state (right) ----------
+    \node[font=\bfseries] at (8.8,5.6) {Post-state: $r_i$};
+    \node[junc, recomputed] (newroot) at (8.8,4.5) {Recomputed node\\$N(d_2,p_2)$};
+    \node[leaf, preserved] (newa) at (7.05,3.0) {Leaf $a$\\$S(h_a)$};
+    \node[junc, fresh] (newj) at (10.55,3.0) {New node\\$N(d_1,p_1)$};
+    \node[leaf, preserved] (newb) at (9.45,1.35) {Leaf $b$\\$O_L(k_b,v_b)$};
+    \node[leaf, fresh] (newc) at (11.65,1.35) {New leaf $c$\\$L$};
     \draw[treeedge] (newroot) -- node[above left] {$0$} (newa);
     \draw[treeedge] (newroot) -- node[above right] {$1$} (newj);
     \draw[treeedge] (newj) -- node[above left] {$0$} (newb);
@@ -829,13 +836,139 @@ Suppose $k$ is absent. If $T=\varepsilon$, use the empty certificate. Otherwise 
 A valid root-to-leaf path has strictly increasing depths in $\{0,\ldots,\kappa\}$, which gives the size bound; both constructions visit each path node once.
 \end{proof}
 
-\subsubsection{Certified histories}
+\subsection{Single-Insertion Updates}
+\label{sec:single-key}
 
-We now turn from certificates against one root to the sequence of roots accepted by the consistency verifier.
+Reduced to its simplest form, a round of the accumulator records one binding: the operator submits $(k,v)$ together with a non-inclusion certificate for $k$, the verifier checks the certificate against the current root, and the next root is read off the same certificate. This subsection develops that protocol into a complete security argument. It needs nothing beyond the certificates just defined: the post-state is \emph{computed} from the pre-state rather than supplied by the prover, so the argument never has to check a structural property of prover-supplied data, and the region commitment of the node hash carries no weight in it (Remark~\ref{rem:derived-vs-checked}). The batch transcript of Section~\ref{sec:stack-verifier} then appears as what it is: a compression of this protocol, paid for with the placement checks whose sufficiency Section~\ref{sec:consistency-theorem} proves (Remark~\ref{rem:single-key-border}).
+
+Throughout, $\mathsf{lcp}(x,y)$ denotes the longest common prefix of the bit strings $x$ and $y$.
+
+\begin{definition}[Insertion]
+\label{def:insert}
+For $k \in \mathcal{K}$ and $v \in \mathcal{V}$, define $\mathsf{ins}(T;k,v)$ on valid trees:
+\begin{enumerate}[nosep,label=(\arabic*)]
+  \item $\mathsf{ins}(\varepsilon;k,v) = \mathsf{Leaf}(k,v)$;
+  \item $\mathsf{ins}(\mathsf{Leaf}(k,v');k,v) = \mathsf{Leaf}(k,v)$;
+  \item if $T \neq \varepsilon$ and $\varrho = \mathsf{reg}(T) \not\preceq k$: with $\hat p = \mathsf{lcp}(\varrho,k)$ and $\hat d = |\hat p|$,
+        \[
+          \mathsf{ins}(T;k,v) =
+          \begin{cases}
+            \mathsf{Node}\bigl(\hat d,\hat p,\mathsf{Leaf}(k,v),T\bigr) & k[\hat d]=0,\\
+            \mathsf{Node}\bigl(\hat d,\hat p,T,\mathsf{Leaf}(k,v)\bigr) & k[\hat d]=1;
+          \end{cases}
+        \]
+  \item if $T = \mathsf{Node}(d,p,l,r)$ and $p \preceq k$: $\mathsf{ins}(T;k,v) = \mathsf{Node}(d,p,\mathsf{ins}(l;k,v),r)$ if $k[d]=0$, and $\mathsf{Node}(d,p,l,\mathsf{ins}(r;k,v))$ if $k[d]=1$.
+\end{enumerate}
+\end{definition}
+
+The case split is exhaustive and exclusive: for a leaf, $\mathsf{reg} \preceq k$ forces the key $k$ itself (clause~2), and otherwise clause~3 applies; for a junction, $|p| = d < \kappa$ makes exactly one of clauses~3 and~4 fire. In clause~3, $\varrho \not\preceq k$ makes $\hat p$ a proper prefix of $\varrho$, so $\hat d < \mathsf{dep}(T) \le \kappa$ and the bit $k[\hat d]$ exists; by maximality of $\hat p$, $\varrho[\hat d] = 1 - k[\hat d]$, so both new edges satisfy the validity conditions of Definition~\ref{def:tree}. Clause~2 is the only one that overwrites a value; Corollary~\ref{cor:run-append} shows that it is never reached in a certified run, which is what makes the accumulator append-only rather than a dictionary.
+
+\begin{lemma}[Canonicity of insertion]
+\label{lem:insert-canon}
+For every finite partial map $M$, key $k \notin \mathrm{dom}(M)$ and value $v$,
+\[
+  \mathsf{ins}\bigl(\mathsf{Tree}(M);k,v\bigr) = \mathsf{Tree}\bigl(M \uplus \{k \mapsto v\}\bigr).
+\]
+\end{lemma}
+\begin{proof}
+Induction on $|\mathrm{dom}(M)|$, writing $T = \mathsf{Tree}(M)$. For $M$ empty, both sides are $\mathsf{Leaf}(k,v)$. Clause~2 never fires, because $T = \mathsf{Leaf}(k,\cdot)$ would put $k$ in $\mathrm{dom}(M)$.
+
+Clause~3. The result is valid: the edges inside $T$ are unchanged, and the two new edges were checked above. Its leaves are those of $T$ together with $\mathsf{Leaf}(k,v)$, so it represents $M \uplus \{k \mapsto v\}$, and Proposition~\ref{prop:unique} identifies it as $\mathsf{Tree}(M \uplus \{k \mapsto v\})$.
+
+Clause~4. By the construction in Proposition~\ref{prop:unique}, $p$ is the longest common prefix of $\mathrm{dom}(M)$, and $l = \mathsf{Tree}(M_{p\|0})$, $r = \mathsf{Tree}(M_{p\|1})$. Take $k[d]=0$; the other side is symmetric. Since $p \preceq k$, adding $k$ leaves the longest common prefix at $p$ and adds the binding to the left cone, so
+\[
+  \mathsf{Tree}\bigl(M \uplus \{k \mapsto v\}\bigr)
+  = \mathsf{Node}\bigl(d,p,\mathsf{Tree}(M_{p\|0} \uplus \{k \mapsto v\}),r\bigr),
+\]
+again by the construction in Proposition~\ref{prop:unique}. The induction hypothesis applied to $M_{p\|0}$ makes the left child $\mathsf{ins}(l;k,v)$.
+\end{proof}
+
+Lemma~\ref{lem:insert-canon} is what makes insertion order irrelevant: iterated from the empty tree, $\mathsf{ins}$ yields $\mathsf{Tree}$ of the accumulated map regardless of the sequence, so the root commits to the recorded map and not to the history that produced it. The next definition computes the digest of the extended tree from a certificate alone, without access to $T$.
+
+\begin{definition}[Update reading]
+\label{def:update-read}
+Let $C = \bigl((d_1,s_1),\ldots,(d_m,s_m);(k',v')\bigr)$ be a certificate (Definition~\ref{def:inclusion-cert}) with terminal key $k' \neq k$, and let $v \in \mathcal{V}$. Put $\ell = H(\texttt{0x00}\|k\|v)$, $\hat p = \mathsf{lcp}(k,k')$, $\hat d = |\hat p|$, and let $c_0,\ldots,c_m$ be the digests of Definition~\ref{def:inclusion-cert}, which depend only on the certificate. Let $t$ be the number of indices $j$ with $d_j > \hat d$; since the depths decrease, these are $j = 1,\ldots,t$. Define
+\[
+  a_t =
+  \begin{cases}
+    H(\texttt{0x01}\|\langle\hat d\rangle\|\langle\hat p\rangle\|\ell\|c_t) & k[\hat d]=0,\\
+    H(\texttt{0x01}\|\langle\hat d\rangle\|\langle\hat p\rangle\|c_t\|\ell) & k[\hat d]=1,
+  \end{cases}
+\]
+and, for $j = t+1,\ldots,m$, with $p_j = k'[0..d_j)$,
+\[
+  a_j =
+  \begin{cases}
+    H(\texttt{0x01}\|\langle d_j\rangle\|\langle p_j\rangle\|a_{j-1}\|s_j) & k'[d_j]=0,\\
+    H(\texttt{0x01}\|\langle d_j\rangle\|\langle p_j\rangle\|s_j\|a_{j-1}) & k'[d_j]=1.
+  \end{cases}
+\]
+The \emph{update reading} of the certificate is $\mathsf{next}(C;k,v) = a_m$; for the empty certificate, $\mathsf{next}(C^\mathsf{inc}_\emptyset;k,v) = \ell$.
+\end{definition}
+
+The update reading is total exactly on the certificates that can certify non-inclusion ($k' \neq k$, or empty); a certificate whose terminal key is $k$ certifies that $k$ is already recorded, and the round is refused. It shares its recursion with verification, so a verifier computes the $c_j$ and $a_j$ in one pass over the certificate; $\mathsf{next}$ itself compares nothing against any root. Theorem~\ref{thm:update} is what licenses reading it once verification against the previous root has succeeded.
+
+\begin{theorem}[Single-insertion update]
+\label{thm:update}
+Let $M$ be a finite partial map and $T = \mathsf{Tree}(M)$, and let a certificate $C$ with terminal key $k' \neq k$, or the empty certificate, verify for $k$ against $\mathsf{dig}(T)$. Then $k \notin \mathrm{dom}(M)$ and, for every $v \in \mathcal{V}$,
+\[
+  \mathsf{next}(C;k,v) = \mathsf{dig}\bigl(\mathsf{Tree}(M \uplus \{k \mapsto v\})\bigr).
+\]
+\end{theorem}
+\begin{proof}
+The empty certificate verifies only against $r = \varnothing$, so $T = \varepsilon$ and $M = \emptyset$, and $\mathsf{next} = \ell = \mathsf{dig}(\mathsf{Tree}(\{k \mapsto v\}))$.
+
+Let $C$ be nonempty. Theorem~\ref{thm:inclusion-cert}(i) gives $k \notin \mathrm{dom}(M)$, and its proof, through Lemma~\ref{lem:match}, identifies the openings of $C$ with the ancestors of $\mathsf{Leaf}(k',v')$ in $T$: the opening at depth $d_j$ coincides with the ancestor junction at that depth, $c_j$ is that junction's digest, $p_j = k'[0..d_j)$ is its true region (Lemma~\ref{lem:shape}(ii)), and $s_j$ is the digest of its subtree on the side away from $k'$. The openings list \emph{every} ancestor, because each opening's on-path child digest is the recomputed $c_{j-1}$, making consecutive openings parent and child in $T$.
+
+No opening has depth $\hat d$: verification requires $k[d_j] = k'[d_j]$, and $k[\hat d] \neq k'[\hat d]$. Hence the ancestors at depths $d_1,\ldots,d_t$ have regions containing the position $\hat d$, so none of them is a prefix of $k$, while the ancestors at depths $d_{t+1},\ldots,d_m$ have regions $p_j \preceq \hat p \preceq k$.
+
+Now run $\mathsf{ins}(T;k,v)$ and compare with Definition~\ref{def:update-read}. At the ancestors of depths $d_m,\ldots,d_{t+1}$, taken root downward, clause~4 of Definition~\ref{def:insert} applies and descends on side $k[d_j] = k'[d_j]$, toward $\mathsf{Leaf}(k',v')$. The next node $U$ on that path is the ancestor at depth $d_t$, or the terminal leaf itself if $t = 0$. The region of $U$ agrees with $k'$ on at least the first $\hat d + 1$ bits, so $\mathsf{lcp}(\mathsf{reg}(U),k) = \mathsf{lcp}(k',k) = \hat p$, and clause~3 grafts $\mathsf{Node}(\hat d,\hat p,\cdot,\cdot)$ over $\mathsf{Leaf}(k,v)$ and $U$, with the new leaf on side $k[\hat d]$. Recomputing digests bottom-up: $\mathsf{dig}(U) = c_t$, the graft junction hashes to $a_t$, and the ancestors above it recombine with the same depths, regions, and sibling digests, giving $a_j$ at depth $d_j$. Hence $\mathsf{dig}(\mathsf{ins}(T;k,v)) = a_m = \mathsf{next}(C;k,v)$, and Lemma~\ref{lem:insert-canon} identifies $\mathsf{ins}(T;k,v)$ as $\mathsf{Tree}(M \uplus \{k \mapsto v\})$.
+\end{proof}
+
+\begin{definition}[Certified single-insertion run]
+\label{def:run}
+A \emph{certified run} is a sequence $(k_1,v_1,C_1,r_1),\allowbreak\ldots,\allowbreak(k_n,v_n,C_n,r_n)$ with $r_0 = \varnothing$ such that, for every $i$, the certificate $C_i$ verifies for $k_i$ against $r_{i-1}$, its terminal key differs from $k_i$ (or $C_i$ is empty), and $r_i = \mathsf{next}(C_i;k_i,v_i)$.
+\end{definition}
+
+\begin{theorem}[Run soundness]
+\label{thm:run}
+In a certified run the keys $k_1,\ldots,k_n$ are pairwise distinct and, with $M_i = \{k_1 \mapsto v_1,\ldots,k_i \mapsto v_i\}$,
+\[
+  r_i = \mathsf{dig}\bigl(\mathsf{Tree}(M_i)\bigr) \qquad \text{for } i = 0,\ldots,n.
+\]
+\end{theorem}
+\begin{proof}
+Induction on $i$; the base is $r_0 = \varnothing = \mathsf{dig}(\mathsf{Tree}(\emptyset))$. If $r_{i-1} = \mathsf{dig}(\mathsf{Tree}(M_{i-1}))$, then Theorem~\ref{thm:update} applied to $C_i$ gives $k_i \notin \mathrm{dom}(M_{i-1})$---so the keys remain distinct and $M_i$ is a partial map---and $r_i = \mathsf{dig}(\mathsf{Tree}(M_i))$.
+\end{proof}
+
+The witness maps $M_i$ are computed from the accepted transcript itself, so the knowledge required by Definition~\ref{def:append-only-accumulator}(i) is explicit; nothing is assumed about what the operator knows. The protocol is complete as well as sound: for $k \notin \mathrm{dom}(M_{i-1})$ the operator produces a verifying certificate by the descent construction of Theorem~\ref{thm:inclusion-cert}(ii), and Theorem~\ref{thm:update} guarantees that the root it leads to is the canonical one.
+
+\begin{corollary}[The run is append-only]
+\label{cor:run-append}
+In a certified run, no key is recorded twice and no recorded value changes: for $j \le i$, the tree committed by $r_i$ assigns $v_j$ to $k_j$, and the overwrite clause of Definition~\ref{def:insert} is never invoked. Moreover, a certificate for a recorded key $k_j$ whose terminal key differs from $k_j$ and which verifies against $r_i$ yields a collision.
+\end{corollary}
+\begin{proof}
+By Theorem~\ref{thm:run}, $r_i$ commits $\mathsf{Tree}(M_i)$ with $M_i \supseteq M_j$ and distinct keys, so $M_i(k_j) = v_j$. The overwrite clause fires only for a key already in the tree, which Theorem~\ref{thm:update} excludes in every round. Finally, Theorem~\ref{thm:inclusion-cert}(i) applied to such a certificate concludes $k_j \notin \mathrm{dom}(M_i)$, contradicting $k_j \in \mathrm{dom}(M_j) \subseteq \mathrm{dom}(M_i)$; so the reduction behind it produces a collision.
+\end{proof}
+
+\begin{remark}[Derived, not checked]
+\label{rem:derived-vs-checked}
+In this protocol the post-state is a function of the pre-state: it is $\mathsf{ins}(T;k,v)$, and the certificate contributes no node to it. Nothing is reconstructed from data chosen by the untrusted operator, so the development needs no validity predicate over anything the operator sends: validity of every state tree is a theorem (Theorem~\ref{thm:run} exhibits the states as $\mathsf{Tree}(M_i)$), and the junction regions used in verification are derived from the terminal key, their correctness being a conclusion of Lemma~\ref{lem:match} rather than a check. The same holds for the user-facing certificates themselves: inclusion and non-inclusion verification (Definition~\ref{def:inclusion-cert}) involves no region locking. Indeed, no statement in this subsection or in Theorem~\ref{thm:inclusion-cert} uses the region operand of the junction hash---all of them would remain valid over a junction hash committing the depth alone. The region commitment is needed exactly where tree shape is imported from the untrusted aggregator: the batch transcript attaches opaque preserved subtrees at prover-claimed positions, and there coherent placement must be \emph{checked}, which is what the region commitment makes locally checkable (Remark~\ref{rem:placement}).
+\end{remark}
+
+\begin{remark}[From one key to a batch]
+\label{rem:single-key-border}
+A round inserting $j$ bindings can be certified by $j$ applications of Theorem~\ref{thm:update} against $j$ intermediate roots, so the single-insertion theory is already a complete security argument for the accumulator. What it does not provide is a \emph{compressed} round: its cost is $j$ independent root-to-leaf certificates, whereas a transcript of the touched part of the tree shares the traversed structure across the batch and is verified in one pass. That compression is what forces the proof format of Section~\ref{sec:stack-verifier}, in which the post-state is assembled from prover-supplied opcodes rather than obtained as $\mathsf{ins}$ of the pre-state---and with it, the placement conclusions of Remark~\ref{rem:derived-vs-checked} become the checks of Algorithm~\ref{alg:stackverify}: edge coherence, confinement, and the region commitment that supports them. The next subsection proves that these checks suffice.
+\end{remark}
+
+\subsection{Certified Update Security}
+\label{sec:consistency-theorem}
+
+We now turn from certificates against one root---and runs of single insertions---to the batch verifier of Section~\ref{sec:stack-verifier} and the sequence of roots it accepts.
 
 \begin{definition}[Certified history; append-only consistency]
 \label{def:aoc}
-A \emph{certified history} is a sequence $(B_1, \pi_1, r_1), \ldots, (B_n, \pi_n, r_n)$ with $r_0 = \varnothing$ and Algorithm~\ref{alg:stackverify} accepting $(\pi_i, r_{i-1}, r_i, B_i)$ for every $i$. Define cumulative maps by
+A \emph{certified history} is a sequence $(B_1, \pi_1, r_1), \allowbreak \ldots, \allowbreak (B_n, \pi_n, r_n)$ with $r_0 = \varnothing$ and Algorithm~\ref{alg:stackverify} accepting $(\pi_i, r_{i-1}, r_i, B_i)$ for every $i$. Define cumulative maps by
 \[
   M_0 = \emptyset, \qquad M_i = M_{i-1} \uplus B_i \quad (i=1,\ldots,n),
 \]
@@ -846,10 +979,7 @@ identifying a batch with its induced partial map. The history is \emph{append-on
 Thus definedness requires every batch to have pairwise distinct keys absent from all earlier batches. By Proposition~\ref{prop:unique}, this definition is equivalent to the existence of valid state trees with the previous round-by-round map-extension property.
 \end{definition}
 
-Definition~\ref{def:aoc} is the formal counterpart of clause~(i) in Definition~\ref{def:append-only-accumulator}; Theorem~\ref{thm:inclusion-cert} gives clauses~(ii) and~(iii) for every canonical state tree. Theorem~\ref{thm:history} links those trees to the roots of a certified history. Definition~\ref{def:aoc} also subsumes prior-state preservation~\eqref{eq:psp}, with the committed maps of Section~\ref{sec:scope} realized as the cumulative maps $M_i$.
-
-\subsection{Certified Update Security}
-\label{sec:consistency-theorem}
+Definition~\ref{def:aoc} is the formal counterpart of clause~(i) in Definition~\ref{def:append-only-accumulator}; Theorem~\ref{thm:inclusion-cert} gives clause~(ii) for every canonical state tree. Theorem~\ref{thm:history} links those trees to the roots of a certified history. Definition~\ref{def:aoc} also subsumes prior-state preservation~\eqref{eq:psp}, with the committed maps of Section~\ref{sec:scope} realized as the cumulative maps $M_i$.
 
 The verifier's checks are node-local. We make this explicit by giving the proof stream a typed syntax tree with recursively defined attributes; the checks become a local predicate on that tree. All reasoning below is structural induction. The algorithm itself appears only in Lemma~\ref{lem:parse}.
 
@@ -1061,7 +1191,7 @@ Apply Theorem~\ref{thm:history}; unless it produces a collision, $r_i=\mathsf{di
 Clause~(ii) is stated over a certificate that has been supplied, not over the set of strings that would verify. The stronger reading---that no verifying certificate for a recorded key \emph{exists}---does not follow from collision resistance: such a certificate is an encoded collision, and the assumption is that collisions cannot be found, not that they are absent.
 
 \begin{remark}
-Theorem~\ref{thm:inclusion-cert} establishes soundness and completeness of inclusion and non-inclusion certificates. Theorems~\ref{thm:round} and~\ref{thm:complete} do the same for each transition, while Theorem~\ref{thm:history} and Corollaries~\ref{cor:unicity}, \ref{cor:batchbound}, \ref{cor:noninc}, and~\ref{cor:service} lift the results to certified histories. Together they establish the accumulator interface of Definition~\ref{def:append-only-accumulator}. The core arguments use structural induction over trees, opening trees, or proof terms, with recursively defined attributes and explicit collision extraction; certificate correctness reduces directly to Matching and canonical path construction. The consistency algorithm appears only in Lemma~\ref{lem:parse}; a re-arithmetization of that verifier, such as the AIR of Section~\ref{sec:custom-air-circuit}, only needs to be proven equivalent to Algorithm~\ref{alg:stackverify}, and the rest of the argument carries over unchanged.
+Theorem~\ref{thm:inclusion-cert} establishes soundness and completeness of inclusion and non-inclusion certificates, and Theorems~\ref{thm:update} and~\ref{thm:run} lift them to a complete security argument for the accumulator updated one insertion at a time. Theorems~\ref{thm:round} and~\ref{thm:complete} do the same for each batched transition, while Theorem~\ref{thm:history} and Corollaries~\ref{cor:unicity}, \ref{cor:batchbound}, \ref{cor:noninc}, and~\ref{cor:service} lift the results to certified histories. Together they establish the accumulator interface of Definition~\ref{def:append-only-accumulator}. The core arguments use structural induction over trees, opening trees, or proof terms, with recursively defined attributes and explicit collision extraction; certificate correctness reduces directly to Matching and canonical path construction. The consistency algorithm appears only in Lemma~\ref{lem:parse}; a re-arithmetization of that verifier, such as the AIR of Section~\ref{sec:custom-air-circuit}, only needs to be proven equivalent to Algorithm~\ref{alg:stackverify}, and the rest of the argument carries over unchanged.
 \end{remark}
 
 
@@ -1087,7 +1217,7 @@ Canonical input digits and all three leaf permutations are fused into $L$ table,
 The arithmetization is split across seven AIR tables that share one batch-STARK commitment. Each table is padded independently to a power-of-two height. All per-round witness values are in main traces; preprocessing consists only of verifier-reconstructible row indices, real-row and permutation-mode masks, and fixed lookup tables derived from the protocol version and the public scalar shape.
 
 \begin{description}[nosep]
-    \item[Table A (opcode execution)] has one row per opcode and a one-hot selector columns for $S/O/O_L/L/N$. A row carries the old and new digests, the old-digest absence bit, advice $(\delta,\varrho)$, and the start index of its post-order subtree. Local rules implement the base-opcode semantics; the last real row binds the execution to $(r_{i-1},r_i)$ and the public old-root absence flag.
+    \item[Table A (opcode execution)] has one row per opcode and a one-hot selector columns for $S$\slash$O$\slash$O_L$\slash$L$\slash$N$. A row carries the old and new digests, the old-digest absence bit, advice $(\delta,\varrho)$, and the start index of its post-order subtree. Local rules implement the base-opcode semantics; the last real row binds the execution to $(r_{i-1},r_i)$ and the public old-root absence flag.
     \item[Table B (Poseidon2)] is the sole evaluator of every Poseidon2 permutation requested by the other tables, using eight vector lanes per row. It records occurrences rather than distinct inputs: two logically separate equal calls occupy multiplicity two. Feed-forward calls expose the full 16-element output, while terminal calls expose only the eight-element digest used by the RSMT.
     \item[Table L (canonical leaves)] has one row for every new leaf $L$ and opened leaf $O_L$. Twenty-six radix-$2^{10}$ digits each for the key and value reconstruct the nine field limbs of an exact 32-byte string; the digits are range-checked, and the reconstructed limbs feed all three steps of the leaf sponge. The row returns the digest together with the key limbs to its Table~A row. The different old-state semantics of $L$ and $O_L$ are imposed in A, so L needs no ``kind'' column.
     \item[Table J (junction joins)] has one row per $N$. It consumes the two child tuples, proves their contiguous post-order locations, derives their common parent region, checks increasing depth and the left/right divergence bit, and enforces confinement whenever the junction is new. The old digest follows the four cases $00/01/10/11$ (empty, right passthrough, left passthrough, or old-child hash) of Formula~\ref{eq:hash-pre-state} (the four-way-rule); the new side always hashes both new children. One node-prefix permutation is shared locally between the old and new child blocks when both are needed.
@@ -1310,7 +1440,7 @@ Different proof systems offer different trade-offs. The relevant properties are 
 
 A second axis of optimization is the scope of the in-circuit statement itself. Drawing that scope correctly requires care: the seemingly sufficient structure-only statement admits a concrete cross-round equivocation attack (Remark~\ref{rem:placement}). The right kernel---\emph{append-only consistency}, i.e., prior-state preservation plus coherent placement of insertions, made locally checkable by the region-committing node hash---is proved sufficient in Theorem~\ref{thm:history}, while completeness and service properties remain self-policed by the protocol around the public root. This still turns a verification problem that naively would require reconstructing the globally unique tree shape into one with a tight, hand-built AIR. The result is the measured proving throughput reported in Section~\ref{sec:measured}: a single Aggregator on a single CPU sustainably exceeds $10\,000$ insertions per second with a 1.7\,MB transparent proof and tens of milliseconds verification time. This shows that operating a very large-scale Aggregation Layer with cryptographically verified updates is practical today, with no GPU farm or trusted setup, and on a power budget compatible with commodity hardware.
 
-Above the per-round proofs sits the aggregation mechanism of Section~\ref{sec:aggregation-audit}: the consistency proofs of all shards and the Consensus Layer's own state transitions are folded, by recursion on a zkVM, into a single fixed-size transparent proof of the correctness of the system's entire operating history. The two validation paths complement each other. The pragmatic path, anchored in the Unicity Trust Base, delivers finality within seconds under the standard BFT quorum assumption; the audit path, available with a delay of minutes to hours, retrospectively removes that assumption from the correctness of the recorded history. The consistency-proof mechanism now carries a formal correctness proof (Theorem~\ref{thm:history} and its corollaries): append-only consistency of the entire certified history reduces to the collision resistance of the underlying hash function. A machine-checked formalization of this proof is the natural next step.
+Above the per-round proofs sits the aggregation mechanism of Section~\ref{sec:aggregation-audit}: the consistency proofs of all shards and the Consensus Layer's own state transitions are folded, by recursion on a zkVM, into a single fixed-size transparent proof of the correctness of the system's entire operating history. The two validation paths complement each other. The pragmatic path, anchored in the Unicity Trust Base, delivers finality within seconds under the standard BFT quorum assumption; the audit path, available with a delay of minutes to hours, retrospectively removes that assumption from the correctness of the recorded history. The consistency-proof mechanism now carries a formal correctness proof (Theorem~\ref{thm:history} and its corollaries), built in two tiers: a single-insertion theory in which a non-inclusion certificate alone drives each update and no placement check is needed at all (Section~\ref{sec:single-key}), and the batched transcript whose placement checks are proved to enforce the same map-level guarantee. In both tiers, append-only consistency of the entire certified history reduces to the collision resistance of the underlying hash function. A machine-checked formalization of this proof is the natural next step.
 
 \begin{figure}[!htbp]
     \centering

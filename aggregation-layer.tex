@@ -270,25 +270,24 @@ Figure~\ref{fig:dataflow} summarizes the flow of authenticated data through the 
 The Aggregation Layer implements a distributed, authenticated, append-only dictionary data structure. It authenticates incoming state transfer certification requests (store new key-value pairs $(k,v)$ to the accumulator) by verifying that the sender possesses the private key corresponding to the public key that identifies the current token owner. The specific authentication protocol is beyond the scope of this paper.
 
 After every round $i$, the state of the aggregator represents a partial function $M_i$ such that for every key $k\in\{0,1\}^\kappa$,
-either $M_i(k)=v$ (if a pair $(k,v)$ was accumulated) or $M_i(k)=\bot$ (if no pairs $(k,v)$ were accumuleted). As $M_i$ is required to be a partial function, from $M_i(k)=v\neq\bot$ it follows that no other pairs $(k,v')$ with $v'\neq v$ can be accumulated. Initially, the partial function is $M_0=\emptyset$, i.e. $M_0(k)=\bot$ for every key $k$.
+either $M_i(k)=v$ (if a pair $(k,v)$ was accumulated) or $M_i(k)=\bot$ (if no pairs $(k,v)$ were accumulated). As $M_i$ is required to be a partial function, from $M_i(k)=v\neq\bot$ it follows that no other pairs $(k,v')$ with $v'\neq v$ can be accumulated. Initially, the partial function is $M_0=\emptyset$, i.e. $M_0(k)=\bot$ for every key $k$.
 
 It is also required that for every $i$, the function $M_{i+1}$ extends the function $M_i$ (denoted by $M_i\subseteq M_{i+1}$), i.e. if $M_i(k)=v\neq\bot$, then $M_{i+1}(k)=v$. This property formalizes the append-only property of the aggregator.
 
 The partial function $M_i$ is certified by computing a digest $r_i=\mathsf{Dig}(M_i)$, which is implemented as the root hash $\mathsf{dig}(T)$ of the RSMT $T=\mathsf{Tree}(M_i)$ of the set of all pairs $(k,v)\in M_i$. Two kinds of cryptographic proofs are used:
 \begin{itemize}
-\item \emph{Inclusion/Non-inclusing proofs} that certify statements $M_i(k)=v$ and are verified against the digest $r_i$, given the pair $(k,v)$. If $v\neq\bot$, the proof is called an inclusion proof, othervise it is called a non-inclusion proof. These proofs are used by users to check the validity of token transfers.
-\item \emph{Extension proofs} that certify the statements $M_i\subseteq M_{i+1}$ and are verified against the digests $r_i$ and $r_{i+1}$. These proofs are used by the Consensus Layer to check that the previous contents of the aggregator were not modified during the round $i+1$.
+\item \emph{Inclusion/Non-inclusion proofs} that certify statements $M_i(k)=v$ and are verified against the digest $r_i$, given the pair $(k,v)$. If $v\neq\bot$, the proof is called an inclusion proof, otherwise it is called a non-inclusion proof. These proofs are used by users to check the validity of token transfers.
+\item \emph{Consistency proofs} that certify the statements $M_i\subseteq M_{i+1}$ and are verified against the digests $r_i$ and $r_{i+1}$. These proofs are used by the Consensus Layer to check that the previous contents of the aggregator were not modified during the round $i+1$.
 \end{itemize}
 
-If $M_i(k)=v$, then the inclusion/non-inclusion proof is easy to construct and if $M_{i}\subseteq M_{i+1}$ then the extension proof is easy to construct.
+If $M_i(k)=v$, then the inclusion/non-inclusion proof is easy to construct and if $M_{i}\subseteq M_{i+1}$ then the consistency proof is easy to construct.
 
-An append-only accumulator starts from the empty partial map $M_0$ and incorporates batches of fresh key--value bindings, producing partial functions $M_1,M_2,\ldots$ and authenticated roots $r_1,r_2,\ldots$. We require the following security property:
+We require the following security properties:
 
-\begin{definition}[Consistency]
+\begin{definition}[Accumulator interface]
 \begin{enumerate}[nosep,label=(\roman*)]
-  \item If an extension proof is successfully verified against $r_i,r_{i+1}$, then the creator of the proof must know partial functions $M_i\subseteq M_{i+1}$ such that $\mathsf{Dig}(M_i)=r_i$ and $\mathsf{Dig}(M_{i+1})=r_{i+1}$.
-  \item It is computationally infeasible to find $(k,r,v,v')$ with $v\neq v'$ and two inclusion/non-inclusion proofs
-  $\pi$ (for $M_i(k)=v$) and $\pi'$ (for $M_i(k)=v'$) that both successfully verify against $r$.
+  \item From any consistency proof that verifies against $(r_i,r_{i+1})$, partial functions $M_i\subseteq M_{i+1}$ with $\mathsf{Dig}(M_i)=r_i$ and $\mathsf{Dig}(M_{i+1})=r_{i+1}$ are efficiently computable, or a collision of the underlying hash function is.
+  \item From $(k,r,v,v')$ with $v\neq v'$ and two inclusion/non-inclusion proofs, one for $M(k)=v$ and one for $M(k)=v'$, that both verify against the same digest $r$, a collision of the underlying hash function is efficiently computable.
 \end{enumerate}
 \label{def:append-only-accumulator}
 \end{definition}
@@ -302,17 +301,17 @@ After each batch of additions, the new root of the Aggregation Layer's SMT is ce
 
     % Nodes
     \node[diagram box, minimum width=5cm] (consensus) {Consensus Layer};
-    \node[diagram box, minimum width=3cm, below=of consensus] (smt) {SMT};
+    \node[diagram box, minimum width=3cm, below=of consensus] (smt) {Aggregator (RSMT)};
     \node[diagram box, minimum width=5cm, below=of smt] (users) {Token Users};
 
     % Arrows
     \draw[diagram arrow] ([xshift=-0.1cm]smt.north) -- ++(0,1) node[diagram label, left] {$(r_i, r_{i-1}, \pi)$} -- ([xshift=-0.1cm]consensus.south);
     \draw[diagram arrow] ([xshift=0.1cm]consensus.south) -- node[diagram label, right] {$c = (i, r_i, r_{i-1}; s_{\textsf{cl}})$} ([xshift=0.1cm]smt.north);
-    \draw[diagram arrow] ([xshift=-0.4cm]users.north) -- node[diagram label, left] {$B = (k_1, k_2, \ldots, k_j)$} ([xshift=-0.4cm]smt.south);
+    \draw[diagram arrow] ([xshift=-0.4cm]users.north) -- node[diagram label, left] {$B_i = ((k_1,v_1), \ldots, (k_j,v_j))$} ([xshift=-0.4cm]smt.south);
     \draw[diagram arrow] ([xshift=0.4cm]smt.south) -- ++(0,-1) node[diagram label, right] {
             $\substack{
-                \pi^{\textsf{inc}}_{k \in \{B_1, \dots, B_i\}} = (v_k \leadsto r, c) \\
-                \pi^{\overline{\textsf {inc}}}_{k \notin \{B_1, \dots, B_i\}} = (\varnothing_k \leadsto r, c)
+                \text{inclusion / non-inclusion certificates}\\
+                \text{against certified } r_i
             }$
             } -- ([xshift=0.4cm]users.north);
 
@@ -320,7 +319,7 @@ After each batch of additions, the new root of the Aggregation Layer's SMT is ce
     \caption{Security model of the Aggregation Layer.}\label{fig:model}
 \end{figure}
 
-For efficiency reasons client requests are processed in batches; the tree is re-calculated and the tree root is certified when a batch is closed. A batch of client requests is denoted as $B_i$. At the end of each batch, the Aggregation Layer produces its summary root hash $r_i$ and sends it to the Consensus Layer for certification. A certification request $(r_i, r_{i-1}, \pi)$ includes: 1) the previous state root hash, 2) the new state root hash, 3) a consistency proof of the changes made during the batch, and 4) an authenticator that identifies the operator.
+For efficiency reasons client requests are processed in batches; the tree is re-calculated and the tree root is certified when a batch is closed. A batch of client requests is denoted as $B_i$. At the end of each batch, the Aggregation Layer produces its summary root hash $r_i$ and sends it to the Consensus Layer for certification. A certification request $(r_i, r_{i-1}, \pi)$ includes: 1) the new state root hash, 2) the previous state root hash, and 3) a consistency proof of the changes made during the batch.
 
 The Consensus Layer certifies the request only if it uniquely \textit{extends} a previously certified state root and the consistency proof is valid. It returns a certificate $c = (i, r_i, r_{i-1}; s_{\textsf{cl}})$, where $s_{\textsf{cl}}$ is a signature from the Consensus Layer (e.g., a threshold signature from the consensus nodes or a proof of inclusion in a finalized block).
 
@@ -384,7 +383,7 @@ The Root of Trust is the Unicity Trust Base: the chain of epoch records of the B
 \subsection{Scope of the In-Circuit Statement}
 \label{sec:scope}
 
-A core engineering choice in the design of the Aggregation Layer's consistency proof is to push as much of the per-round security argument out of the cryptographic proof as possible, leaving only a small kernel inside the circuit. The value of the scoping is engineering economy---it keeps the circuit small. Drawing the boundary correctly, however, requires care: it is tempting to place \emph{all} placement-related properties outside the kernel, on the argument that a misplaced insertion only damages the aggregator's own ability to serve proofs. Remark~\ref{rem:placement} refutes that argument by a concrete attack; the boundary is drawn below and proved sufficient in Section~\ref{sec:consistency-formal}.
+A core engineering choice in the design of the Aggregation Layer's consistency proof is to push as much of the per-round security argument out of the cryptographic proof as possible, leaving only a small kernel inside the circuit. The value of the scoping is engineering economy---it keeps the circuit small. Drawing the boundary correctly, however, requires care: it is tempting to place \emph{all} placement-related properties outside the kernel, on the argument that a misplaced insertion only damages the aggregator's own ability to serve proofs. Remark~\ref{rem:placement} refutes that argument by a concrete attack; the boundary is drawn below and proved sufficient in Sections~\ref{sec:single-key} and~\ref{sec:consistency-theorem}.
 
 Let $M_{i-1}, M_i \colon \{0,1\}^* \to \{0,1\}^* \cup \{\bot\}$ be the partial maps of recorded key-value bindings committed by, respectively, the previous and the new state roots $r_{i-1}, r_i$ (Section~\ref{sec:consistency-formal} makes ``committed by'' precise). We say the round update $r_{i-1} \to r_i$ satisfies \emph{prior-state preservation} iff
 \begin{equation}
@@ -422,9 +421,9 @@ The authenticated dictionary lies on two critical paths. Users obtain inclusion 
 
 A conventional indexed SMT (\emph{Sparse Merkle Tree}) assigns every key to a leaf of a fixed-depth binary tree. Empty subtrees are implicit, and storage and proofs can omit single-child chains. Its main security advantage is that the placement is part of the tree semantics, so a prover cannot choose an alternative path for a key. A batch-consistency witness supplies the untouched sibling subtrees around the batch, and the verifier reconstructs the old root with the batch positions empty and the new root with them populated. A post-order stack encoding makes this construction reasonably regular, although stack entries and branch instructions must still carry absolute positions in the indexed tree.\footnote{Experiment: \href{https://github.com/ristik/ndsmt-experiments/blob/main/ndsmt_op.py}{https://github.com/.../ndsmt\_op.py}}
 
-Alternative is breadth-first traversal, where the witness is a per-layer array of ordered missing siblings necessary to reconstruct the old and new roots. This results in a one-pass (per root) linear verification algorithm, without lookups.\footnote{Experiment: \href{https://github.com/ristik/ndsmt-experiments/blob/main/ndsmt_lvl.py}{https://github.com/.../ndsmt\_lvl.py}}
+An alternative is breadth-first traversal, where the witness is a per-layer array of ordered missing siblings necessary to reconstruct the old and new roots. This results in a one-pass (per root) linear verification algorithm, without lookups.\footnote{Experiment: \href{https://github.com/ristik/ndsmt-experiments/blob/main/ndsmt_lvl.py}{https://github.com/.../ndsmt\_lvl.py}}
 
-A Patricia or radix tree makes path compression part of the committed structure instead. It stores only leaves and  bifurcations, rather than making intractably large tree manageable through optimizations. Hashing the full key with the value anchors each leaf, and committing an internal node to its absolute bifurcation depth makes every existing node immutable when a later insertion splits an edge above it. The touched post-state can then be serialized with three basic instructions: a preserved subtree \(S\), a new leaf \(L\), and a junction \(N\). A stack machine evaluates the same transcript twice, passing preserved hashes through on the old side and constructing the new root on the other. This is a natural shape for tabular AIR arithmetization: the verifier is a single forward scan (passes to compute pre-state and post-state are natural to combine) with bounded stack state and one local rule per instruction.
+A Patricia or radix tree makes path compression part of the committed structure instead. It stores only leaves and bifurcations, rather than making an intractably large tree manageable through optimizations. Hashing the full key with the value anchors each leaf, and committing an internal node to its absolute bifurcation depth makes every existing node immutable when a later insertion splits an edge above it. The touched post-state can then be serialized with three basic instructions: a preserved subtree \(S\), a new leaf \(L\), and a junction \(N\). A stack machine evaluates the same transcript twice, passing preserved hashes through on the old side and constructing the new root on the other. This is a natural shape for tabular AIR arithmetization: the verifier is a single forward scan (passes to compute pre-state and post-state are natural to combine) with bounded stack state and one local rule per instruction.
 
 Path compression also gives compact user proofs. A certificate needs one sibling hash per junction on the key-directed path, a bitmap (or list) of their depths, and the leaf at which the path ends; on random keys the number of such junctions grows logarithmically with the capacity. Because key-directed descent is deterministic, the same format serves non-inclusion: the path simply ends at a different leaf. But, the extra complexity is that the canonical data-structure construction must be validated by the verifier, specifically the proof must establish that each prover-supplied junction is in the correct key-space region.
 
@@ -467,12 +466,12 @@ The property that verification enforces is \emph{append-only consistency} (Defin
 
 The accumulator is implemented as the \emph{RSMT} (radix sparse Merkle tree): a binary Patricia tree over fixed-length keys, path-compressed, with a region-committing node hash. The consistency proof is a transcript of the touched part of the tree, executed by a stack machine.
 
-Let $H \colon \{0,1\}^{*} \to \{0,1\}^{\lambda}$ be the hash function. A leaf hashes the full key together with the value, and a junction hashes its two children together with its bifurcation depth $d$ and its \emph{region} $p$:
+Let $H \colon \{0,1\}^{*} \to \{0,1\}^{\lambda}$ be the hash function. A leaf hashes the full key together with the value, and a junction hashes its two children $x$ and $y$ together with its bifurcation depth $d$ and its \emph{region} $p$:
 \begin{align*}
-  h_L &= H(\texttt{0x00} \parallel k \parallel v),\\
-  h_N &= H(\texttt{0x01} \parallel \langle d\rangle \parallel \langle p\rangle \parallel h_l \parallel h_r).
+  \mathsf{LeafHash}(k,v) &:= H(\texttt{0x00} \parallel k \parallel v),\\
+  \mathsf{NodeHash}(d,p,x,y) &:= H(\texttt{0x01} \parallel \langle d\rangle \parallel \langle p\rangle \parallel x \parallel y).
 \end{align*}
-The region $p \in \{0,1\}^d$ is the key prefix that addresses the node: every key below the junction extends $p$, with $p\|0$ leading left and $p\|1$ leading right; $\langle\cdot\rangle$ are fixed-length injective encodings. A leaf's region is its full key, and its depth is $\kappa = 256$. (We write $\varrho[j]$ for bit $j$ of a region and $\varrho[0..d)$ for its first $d$ bits.) The domain-separation prefixes make leaf and junction hashes disjoint; the depth commitment prevents re-attaching a subtree at a different level; the region commitment pins the node to its key-space position; and fixed child positions prevent swapping. Crucially, depth and region are \emph{absolute} properties of a node---splitting an edge above it changes neither---so inserting new keys never re-hashes any pre-existing node: an insertion creates only new leaf and junction hashes. This immutability of pre-state hashes is what the proof encoding exploits. (The hash function is an instantiation detail: the portable reference implementation uses SHA-256, the AIR a Poseidon2 sponge.) User-facing certificates transmit only junction depths and sibling digests, plus the leaf at which the path terminates: the verifier reconstructs the expected region of every junction on the path from that leaf's key $k'$, as $k'[0..d_j)$, and binds the path to the target key $k$ by requiring $k[d_j]=k'[d_j]$ at every junction. Inclusion and non-inclusion certificates are the same object, encoded as \texttt{InclusionCertificate} and differentiated by whether the terminal key equals $k$ (Definition~\ref{def:inclusion-cert}). Read a second time, a non-inclusion certificate also determines the root that results from inserting $k$, which makes it a single-insertion consistency proof in its own right (Section~\ref{sec:single-key}).
+The region $p \in \{0,1\}^d$ is the key prefix that addresses the node: every key below the junction extends $p$, with $p\|0$ leading left and $p\|1$ leading right; $\langle\cdot\rangle$ are fixed-length injective encodings. A leaf's region is its full key, and its depth is $\kappa = 256$. (We write $\varrho[j]$ for bit $j$ of a region and $\varrho[0..d)$ for its first $d$ bits.) The domain-separation prefixes make leaf and junction hashes disjoint; the depth commitment prevents re-attaching a subtree at a different level; the region commitment pins the node to its key-space position; and fixed child positions prevent swapping. Crucially, depth and region are \emph{absolute} properties of a node---splitting an edge above it changes neither---so inserting new keys never re-hashes any pre-existing node: an insertion creates only new leaf and junction hashes. This immutability of pre-state hashes is what the proof encoding exploits. (The hash function is an instantiation detail: the portable reference implementation uses SHA-256, the AIR a Poseidon2 sponge.) User-facing certificates transmit only junction depths and sibling digests, plus the leaf at which the path terminates; the verifier derives the junction regions from that leaf's key and binds the path to the target key by one bit comparison per junction. Inclusion and non-inclusion certificates are the same object, encoded as \texttt{InclusionCertificate} and differentiated by whether the terminal key equals the target key (Definition~\ref{def:inclusion-cert}). Read a second time, a non-inclusion certificate also determines the root that results from inserting $k$, which makes it a single-insertion consistency proof in its own right (Section~\ref{sec:single-key}).
 
 The consistency proof $\pi$ for round $i$ is the post-order serialization of the \emph{touched} part of the post-state tree, over a five-opcode alphabet:
 \begin{description}[nosep]
@@ -483,57 +482,54 @@ The consistency proof $\pi$ for round $i$ is the post-order serialization of the
   \item[$N(d)$:] a junction at bifurcation depth $d$, over the two preceding stack entries. Junction regions are not present in the proof; the verifier derives them.
 \end{description}
 
-The verifier (Algorithm~\ref{alg:stackverify-core}; the complete form is Algorithm~\ref{alg:stackverify} in Appendix~\ref{app:verifier}) executes the stream against a stack of triples: the subtree's pre-state digest, its post-state digest, and an \emph{advice tuple} $(\delta, \varrho)$---the depth and region of the subtree's top node, $(\kappa, k)$ for leaves, absent ($\bot$) for opaque $S$ entries. The batch is sorted by the verifier itself into tree-traversal order and must be strictly increasing, so the prover has no freedom in associating $L$ opcodes with batch elements. Processing $N(d)$ combines three rule families:
+The verifier (Algorithm~\ref{alg:stackverify}) executes the stream against a stack of triples: the subtree's pre-state digest, its post-state digest, and an \emph{advice tuple} $(\delta, \varrho)$---the depth and region of the subtree's top node, $(\kappa, k)$ for leaves, absent ($\bot$) for opaque $S$ entries. The batch is sorted by the verifier itself into tree-traversal order and must be strictly increasing, so the prover has no freedom in associating $L$ opcodes with batch elements. Processing $N(d)$ combines three rule families:
 \begin{enumerate}[nosep]
   \item \emph{Edge coherence.} Every child that carries advice must satisfy $\delta > d$ and $\varrho[d] = \beta$, where $\beta$ is the child's side. The first $d$ bits of $\varrho$ yield the junction's region $p$; all advised children must agree on it, and at least one child must be advised, so $p$ is always defined.
   \item \emph{Confinement of opaque subtrees.} If the junction is absent from the pre-state---its old side arises by pass-through or $\varnothing$---then \emph{both} children must carry advice. An opaque $S$ may therefore appear only under pre-existing junctions, whose edges were checked in the round that created them and are frozen by the hashes; wherever a preserved subtree meets a new junction, the prover must present its opened form.
   \item \emph{Digest algebra.} The pre-state digest of a junction follows a four-way rule: if both children existed in the pre-state, the junction existed too and its old digest is recomputed; if exactly one child existed, the junction is new and the old digest of the existing child passes through unchanged; if neither existed, the old digest is the empty marker $\varnothing$. The post-state digest is always recomputed. The pass-through cases are what keep consistency proofs short: no hashing is performed on the parts of the tree that did not change.
 \end{enumerate}
 
-For compactness, write
-\[
-  \mathsf{NodeHash}(d,p,x,y)
-  :=H(\texttt{0x01}\|\langle d\rangle\|\langle p\rangle\|x\|y),
-\]
-and collect the four-way pre-state rule in the helper
+Collect the four-way pre-state rule in the helper
 \begin{equation}
-\begin{aligned}
-&\mathsf{HashPreState}(d,p,x,y)\\[-0.25ex]
-&\quad =
+\mathsf{HashPreState}(d,p,x,y) =
   \begin{cases}
     \varnothing, & (x,y)=(\varnothing,\varnothing),\\
     y,           & x=\varnothing,\ y\neq\varnothing,\\
     x,           & x\neq\varnothing,\ y=\varnothing,\\
     \mathsf{NodeHash}(d,p,x,y), & x,y\neq\varnothing.
   \end{cases}
-\end{aligned}
 \label{eq:hash-pre-state}
 \end{equation}
 Thus a newly introduced junction disappears when reconstructing the pre-state, whereas a junction already present in that state is re-hashed.
 
 \begin{algorithm}[t!]
-  \caption{Stack-machine verification of the RSMT consistency proof (operand-domain checks omitted)}\label{alg:stackverify-core}
-  %\footnotesize  % to fit to 1 column
+  \caption{Stack-machine verification of the RSMT consistency proof}\label{alg:stackverify}
+  \footnotesize
   \begin{algorithmic}[0]
     \Function{VerifyConsistency}{$\pi, r_{i-1}, r_i, B$}
       \If{$B = [\,]$}
         \State \Return $r_{i-1} = r_i \;\land\; \pi = [\,]$
       \EndIf
       \State $B \gets \Call{SortTraversalOrder}{B}$
+      \State \textbf{assert} keys of $B$ in $\{0,1\}^{\kappa}$, strictly increasing
       \State $\mathit{st} \gets [\,]$; \quad $b \gets 0$ \Comment{stack; batch index}
       \For{opcode $o$ \textbf{in} $\pi$}
         \If{$o = S(c)$} \Comment{opaque subtree}
+          \State \textbf{assert} $c \in \{0,1\}^{\lambda}$
           \State \Call{Push}{$\mathit{st}, (c, c, \bot)$}
         \ElsIf{$o = O(d', p', c_l, c_r)$} \Comment{opening}
-          \State $c \gets H(\texttt{0x01} \| \langle d'\rangle \| \langle p'\rangle \| c_l \| c_r)$
+          \State \textbf{assert} $0 \le d' < \kappa \land p' \in \{0,1\}^{d'} \land c_l, c_r \in \{0,1\}^{\lambda}$
+          \State $c \gets \Call{NodeHash}{d', p', c_l, c_r}$
           \State \Call{Push}{$\mathit{st}, (c, c, (d', p'))$}
         \ElsIf{$o = O_L(k', v')$} \Comment{opened leaf}
-          \State $c \gets H(\texttt{0x00} \| k' \| v')$
+          \State \textbf{assert} $k' \in \{0,1\}^{\kappa}$
+          \State $c \gets \Call{LeafHash}{k', v'}$
           \State \Call{Push}{$\mathit{st}, (c, c, (\kappa, k'))$}
         \ElsIf{$o = L$} \Comment{new leaf}
           \State $(k, v) \gets B[b]$; \quad $b \gets b + 1$
-          \State \Call{Push}{$\mathit{st}, (\varnothing,\; H(\texttt{0x00} \| k \| v),\; (\kappa, k))$}
+          \State \Call{Push}{$\mathit{st}, (\varnothing,\; \Call{LeafHash}{k, v},\; (\kappa, k))$}
         \ElsIf{$o = N(d)$} \Comment{junction}
+          \State \textbf{assert} $0 \le d < \kappa$
           \State $(c^{\mathsf o}_r, c^{\mathsf n}_r, a_r) \gets \Call{Pop}{\mathit{st}}$
           \State $(c^{\mathsf o}_l, c^{\mathsf n}_l, a_l) \gets \Call{Pop}{\mathit{st}}$
           \State $p \gets \bot$
@@ -561,7 +557,7 @@ Thus a newly introduced junction disappears when reconstructing the pre-state, w
   \end{algorithmic}
 \end{algorithm}
 
-Algorithm~\ref{alg:stackverify-core} omits only the operand-domain assertions ($c \in \{0,1\}^{\lambda}$, $0 \le d < \kappa$, $p \in \{0,1\}^{d}$, $k \in \{0,1\}^{\kappa}$), for readability. The complete verifier, Algorithm~\ref{alg:stackverify} in Appendix~\ref{app:verifier}, includes them; the formal statements refer to it. Verification accepts iff the opcode stream and the batch are both fully consumed, the stack holds exactly one triple, and its digest pair equals $(r_{i-1}, r_i)$; any failed assertion, malformed opcode, stack underflow, or batch overrun rejects. The verifier is a short loop with no recursion and no control flow beyond opcode dispatch---one uniform rule per opcode; its memory use is bounded by the tree depth, and the post-order format makes verification a natural streaming computation. This regularity is deliberate: it is what the AIR arithmetization of Section~\ref{sec:custom-air-circuit} exploits, one trace row per opcode with a fixed constraint family. In-circuit, the equations that derive a junction region from its children are also the edge-coherence constraints, and the same canonical region limbs feed the junction hash. The arithmetization implements this complete rule set, including opened nodes and leaves, canonical encodings, confinement at new junctions, and coherent key placement.
+Verification accepts iff the opcode stream and the batch are both fully consumed, the stack holds exactly one triple, and its digest pair equals $(r_{i-1}, r_i)$; any failed assertion, malformed opcode, stack underflow, or batch overrun rejects. The verifier is a short loop with no recursion and no control flow beyond opcode dispatch---one uniform rule per opcode; its memory use is bounded by the tree depth, and the post-order format makes verification a natural streaming computation. This regularity is deliberate: it is what the AIR arithmetization of Section~\ref{sec:custom-air-circuit} exploits, one trace row per opcode with a fixed constraint family. In-circuit, the equations that derive a junction region from its children are also the edge-coherence constraints, and the same canonical region limbs feed the junction hash. The arithmetization implements this complete rule set, including operand-domain checks, canonical encodings, confinement at new junctions, and coherent key placement.
 
 For the honest prover, the transcript differs from a bare depth-only encoding only in the openings: one opened junction or leaf per split edge---the node the insertion descends past last. Measured with the reference implementation on a batch of $1\,000$ insertions into a tree of $10^4$ keys, the transcript is within $15\%$ of the size of the depth-only encoding; the derived regions cost nothing on the wire.
 
@@ -569,7 +565,7 @@ For the honest prover, the transcript differs from a bare depth-only encoding on
 \subsection{Insertion Example}
 \label{sec:worked-insertion}
 
-Consider the two-leaf pre-state in Figure~\ref{fig:worked-insertion}. The root junction separates $a$ from $b$ at depth $d_2$. A new leaf $c$ is added with key $k_c$; follows the route towards $b$, shares the longer prefix $p_1$ with $k_b$, and diverges from it at depth $d_1$, where $d_2<d_1<\kappa$. Thus $k_a[d_2]=0$, $k_b[d_2]=k_c[d_2]=1$, while $k_b[d_1]=0$ and $k_c[d_1]=1$. Inserting $c=(k_c,v_c)$ splits the edge above $b$: it creates a new leaf and a new junction $N(d_1,p_1)$, but changes no pre-existing leaf hash.
+Consider the two-leaf pre-state in Figure~\ref{fig:worked-insertion}. The root junction separates $a$ from $b$ at depth $d_2$. A new leaf $c$ is added with key $k_c$; it follows the route towards $b$, shares the longer prefix $p_1$ with $k_b$, and diverges from it at depth $d_1$, where $d_2<d_1<\kappa$. Thus $k_a[d_2]=0$, $k_b[d_2]=k_c[d_2]=1$, while $k_b[d_1]=0$ and $k_c[d_1]=1$. Inserting $c=(k_c,v_c)$ splits the edge above $b$: it creates a new leaf and a new junction $N(d_1,p_1)$, but changes no pre-existing leaf hash.
 
 \begin{figure}[htb]
   \centering
@@ -611,7 +607,7 @@ Consider the two-leaf pre-state in Figure~\ref{fig:worked-insertion}. The root j
   \label{fig:worked-insertion}
 \end{figure}
 
-Let $h_x=H(\texttt{0x00}\|k_x\|v_x)$ for $x\in\{a,b,c\}$ and
+Let $h_x=\mathsf{LeafHash}(k_x,v_x)$ for $x\in\{a,b,c\}$ and
 \[
   h_{N_1}=\mathsf{NodeHash}(d_1,p_1,h_b,h_c).
 \]
@@ -626,33 +622,53 @@ Post-order traversal gives the five-opcode transcript
 \]
 The leaf $b$ is an opening rather than an opaque $S$: it meets a junction absent from the pre-state, so confinement requires both children of that junction to carry advice. Leaf $a$ remains opaque because the outer junction existed previously.
 
-Table~\ref{tab:worked-stack} shows the top entry after every opcode; entries below it are unchanged until they are popped. At $N(d_1)$, both children are advised, their regions yield the same $p_1$, and $\mathsf{HashPreState}$ passes through $h_b$. At $N(d_2)$, the left child may be opaque because both old children exist; the advised right child determines $p_2$, and the verifier reconstructs both public roots.
+Table~\ref{tab:worked-stack} traces Algorithm~\ref{alg:stackverify} over the transcript: for every opcode it lists the checks performed, the pre-state and post-state digest computations, and the stack contents afterwards. The asymmetry of the two readings is visible in the junction rows: the post-state side hashes every junction, whereas on the pre-state side the new junction $N(d_1)$ contributes no hash---$\mathsf{HashPreState}$ passes $h_b$ through, so the pre-state root is assembled exactly as if leaf $b$ still hung on the outer edge. The advice fields make the placement checks concrete: the opened leaf $b$ supplies the advice that the new junction $N(d_1)$ requires, the opaque $S(h_a)$ supplies none, and $N(d_2)$ accepts it only because both of its old child digests are present.
 
 \begin{table}[H]
 \centering
-\caption{Stack-machine verification of the insertion in Figure~\ref{fig:worked-insertion}. Only the top entry after each opcode is shown.}
+\caption{Stack-machine verification of the insertion in Figure~\ref{fig:worked-insertion}. Each stack entry is a triple $(c^{\mathsf o}, c^{\mathsf n}, a)$ of pre-state digest, post-state digest, and advice $(\delta,\varrho)$; entries are listed bottom to top, and a junction opcode pops the two topmost entries as its left and right child.}
 \label{tab:worked-stack}
 \footnotesize
-\renewcommand{\arraystretch}{1.18}
-\begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.54\columnwidth}
-                    >{\raggedright\arraybackslash}p{0.34\columnwidth}@{}}
+\renewcommand{\arraystretch}{1.3}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}
+  >{\raggedright\arraybackslash}p{1.6cm}
+  >{\raggedright\arraybackslash}p{3.5cm}
+  >{\raggedright\arraybackslash}p{3.5cm}
+  >{\raggedright\arraybackslash}p{3.5cm}
+  >{\raggedright\arraybackslash}p{3.1cm}@{}}
 \toprule
-\textbf{Opcode and computation} & \textbf{Top after} \\
+\textbf{Opcode} & \textbf{Checks} & \textbf{Pre-state side $c^{\mathsf o}$} & \textbf{Post-state side $c^{\mathsf n}$} & \textbf{Stack after} \\
 \midrule
-$S(h_a)$: push opaque subtree
-  & $(h_a,h_a,\bot)$ \\
-$O_L(k_b,v_b)$: recompute $h_b$
-  & $(h_b,h_b,(\kappa,k_b))$ \\
-$L$: consume $(k_c,v_c)$
-  & $(\varnothing,h_c,(\kappa,k_c))$ \\
-$N(d_1)$: derive $p_1$; then
-  $\mathsf{HashPreState}(d_1,p_1,h_b,\varnothing)=h_b$ and
-  $\mathsf{NodeHash}(d_1,p_1,h_b,h_c)=h_{N_1}$
-  & $(h_b,h_{N_1},(d_1,p_1))$ \\
-$N(d_2)$: derive $p_2$; then
-  $\mathsf{HashPreState}(d_2,p_2,h_a,h_b)=r_{i-1}$ and
-  $\mathsf{NodeHash}(d_2,p_2,h_a,h_{N_1})=r_i$
-  & $(r_{i-1},r_i,(d_2,p_2))$ \\
+$S(h_a)$ &
+  $h_a \in \{0,1\}^{\lambda}$ &
+  $h_a$, opaque; not recomputed &
+  $h_a$; the subtree is untouched &
+  $(h_a,\,h_a,\,\bot)$ \\
+\addlinespace
+$O_L(k_b,v_b)$ &
+  $k_b \in \{0,1\}^{\kappa}$ &
+  $h_b = \mathsf{LeafHash}(k_b,v_b)$, recomputed from the opened preimage &
+  $h_b$; the leaf persists &
+  \makecell[l]{$(h_a,\,h_a,\,\bot)$\\ $(h_b,\,h_b,\,(\kappa,k_b))$} \\
+\addlinespace
+$L$ &
+  consumes $(k_c,v_c)$, the next element of the sorted batch &
+  $\varnothing$; no leaf at $k_c$ in the pre-state &
+  $h_c = \mathsf{LeafHash}(k_c,v_c)$ &
+  \makecell[l]{$(h_a,\,h_a,\,\bot)$\\ $(h_b,\,h_b,\,(\kappa,k_b))$\\ $(\varnothing,\,h_c,\,(\kappa,k_c))$} \\
+\addlinespace
+$N(d_1)$ \newline pops $b$, $c$ &
+  coherence: $\kappa > d_1$, $k_b[d_1]=0$, $k_c[d_1]=1$; agreement: $p_1 = k_b[0..d_1) = k_c[0..d_1)$; confinement: $c^{\mathsf o}$ of $c$ is $\varnothing$, so both children must be advised---hence $b$ was sent opened &
+  $\mathsf{HashPreState}$\newline${}(d_1,p_1,h_b,\varnothing) = h_b$; the junction is absent from the pre-state and the surviving child passes through &
+  $\mathsf{NodeHash}(d_1,p_1,h_b,h_c)$\newline${} = h_{N_1}$; the new junction is hashed &
+  \makecell[l]{$(h_a,\,h_a,\,\bot)$\\ $(h_b,\,h_{N_1},\,(d_1,p_1))$} \\
+\addlinespace
+$N(d_2)$ \newline pops $a$, $N_1$ &
+  coherence: $d_1 > d_2$, $p_1[d_2]=1$; region: $p_2 = p_1[0..d_2)$; the unadvised left child is permitted, as both old digests are present and the junction pre-exists &
+  both children present, so the pre-state junction is re-hashed: \newline $\mathsf{NodeHash}(d_2,p_2,h_a,h_b)$\newline${} = r_{i-1}$ &
+  $\mathsf{NodeHash}(d_2,p_2,h_a,h_{N_1})$\newline${} = r_i$ &
+  $(r_{i-1},\,r_i,\,(d_2,p_2))$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -661,13 +677,13 @@ The proof accepts because the transcript and batch are exhausted and the final s
 
 \begin{remark}[Why the region commitment is necessary]
 \label{rem:placement}
-Everything in Algorithm~\ref{alg:stackverify-core} beyond the digest algebra exists to enforce coherent placement. Consider the minimal alternative: the junction hash commits the depth alone, $h_N = H(\texttt{0x01} \| \langle d\rangle \| h_l \| h_r)$, the alphabet shrinks to $S$, $L$, $N$, and only the digest algebra is checked. Let the pre-state with certified root $r_{i-1}$ contain the recorded binding $(k, v)$, and pick any depth $d^{*}$ with $k[d^{*}] = 1$. The three-opcode stream $(S(r_{i-1}), L, N(d^{*}))$ then verifies for the batch $\{(k, v')\}$, $v' \ne v$: the old side of $N(d^{*})$ passes $r_{i-1}$ through, and the new side hangs the entire pre-state tree on the $0$-side of the new junction, while the key-directed descent for $k$ leads to the $1$-side. Under the certified $r_i$, a one-step inclusion proof for $(k, v')$ verifies, and the preserved binding $(k, v)$ is no longer provable: cross-round equivocation on $k$, invisible to every structural check, including the full-history audit of Section~\ref{sec:aggregation-audit}. Algorithm~\ref{alg:stackverify-core} rejects the stream: the preserved child of a new junction must be presented opened, and edge coherence requires its region to extend $p\|0$ while the new leaf's key extends $p\|1$---impossible, since the preserved subtree's region is a prefix of $k$. Theorem~\ref{thm:round} shows that every attack of this kind is excluded.
+Everything in Algorithm~\ref{alg:stackverify} beyond the digest algebra exists to enforce coherent placement. Consider the minimal alternative: the junction hash commits the depth alone, $h_N = H(\texttt{0x01} \| \langle d\rangle \| h_l \| h_r)$, the alphabet shrinks to $S$, $L$, $N$, and only the digest algebra is checked. Let the pre-state with certified root $r_{i-1}$ contain the recorded binding $(k, v)$, and pick any depth $d^{*}$ with $k[d^{*}] = 1$. The three-opcode stream $(S(r_{i-1}), L, N(d^{*}))$ then verifies for the batch $\{(k, v')\}$, $v' \ne v$: the old side of $N(d^{*})$ passes $r_{i-1}$ through, and the new side hangs the entire pre-state tree on the $0$-side of the new junction, while the key-directed descent for $k$ leads to the $1$-side. Under the certified $r_i$, a one-step inclusion proof for $(k, v')$ verifies, and the preserved binding $(k, v)$ is no longer provable: cross-round equivocation on $k$, invisible to every structural check, including the full-history audit of Section~\ref{sec:aggregation-audit}. Algorithm~\ref{alg:stackverify} rejects the stream: the preserved child of a new junction must be presented opened, and edge coherence requires its region to extend $p\|0$ while the new leaf's key extends $p\|1$---impossible, since the preserved subtree's region is a prefix of $k$. Theorem~\ref{thm:round} shows that every attack of this kind is excluded.
 \end{remark}
 
 \subsection{Formal Model}
 \label{sec:consistency-formal}
 
-We fix the key length $\kappa = 256$, key space $\mathcal{K} = \{0,1\}^{\kappa}$, a value space $\mathcal{V} \subseteq \{0,1\}^{*}$, and a hash function $H \colon \{0,1\}^{*} \to \{0,1\}^{\lambda}$. For bit strings, $p \preceq q$ denotes that $p$ is a prefix of $q$, $q[j]$ is the $j$-th bit, and $q[0..d)$ is the first $d$ bits; $\langle\cdot\rangle$ are fixed-length injective encodings; $\varnothing$ is a distinguished constant outside $\{0,1\}^{\lambda}$. All statements below are unconditional reductions: each concludes either the stated property, or that two distinct strings with equal $H$-images (a \emph{collision}) are computable in time linear in the size of the objects at hand. We do not repeat this disjunction in every statement.
+We fix the key length $\kappa = 256$, key space $\mathcal{K} = \{0,1\}^{\kappa}$, a value space $\mathcal{V} \subseteq \{0,1\}^{*}$, and a hash function $H \colon \{0,1\}^{*} \to \{0,1\}^{\lambda}$. For bit strings, $p \preceq q$ denotes that $p$ is a prefix of $q$, $q[j]$ is the $j$-th bit, $q[0..d)$ is the first $d$ bits, and $\mathsf{lcp}(x,y)$ is the longest common prefix of $x$ and $y$; $\langle\cdot\rangle$ are fixed-length injective encodings; $\varnothing$ is a distinguished constant outside $\{0,1\}^{\lambda}$. All statements below are unconditional reductions: each concludes either the stated property, or that two distinct strings with equal $H$-images (a \emph{collision}) are computable in time linear in the size of the objects at hand. We do not repeat this disjunction in every statement.
 
 \subsubsection{Tree commitments}
 
@@ -677,13 +693,17 @@ Trees are generated by
 \[ T ::= \mathsf{Leaf}(k, v) \mid \mathsf{Node}(d, p, T_l, T_r) \]
 with $k \in \mathcal{K}$, $v \in \mathcal{V}$, $0 \le d < \kappa$, $p \in \{0,1\}^{d}$; $\varepsilon$ denotes the empty tree. Digests:
 \begin{align*}
-\mathsf{dig}(\mathsf{Leaf}(k,v)) &= H(\texttt{0x00} \| k \| v),\\
-\mathsf{dig}(\mathsf{Node}(d,p,l,r)) &= H(\texttt{0x01} \| \langle d\rangle \| \langle p\rangle \| \mathsf{dig}(l) \| \mathsf{dig}(r)),
+\mathsf{dig}(\mathsf{Leaf}(k,v)) &= \mathsf{LeafHash}(k,v),\\
+\mathsf{dig}(\mathsf{Node}(d,p,l,r)) &= \mathsf{NodeHash}(d,p,\mathsf{dig}(l),\mathsf{dig}(r)),
 \end{align*}
 and $\mathsf{dig}(\varepsilon) = \varnothing$. Region and depth: $\mathsf{reg}(\mathsf{Leaf}(k,v)) = k$ and $\mathsf{reg}(\mathsf{Node}(d,p,\cdot,\cdot)) = p$; $\mathsf{dep}(\mathsf{Leaf}) = \kappa$ and $\mathsf{dep}(\mathsf{Node}(d,\ldots)) = d$. A tree is \emph{valid} if every junction $\mathsf{Node}(d,p,l,r)$ in it satisfies: $l$ and $r$ are nonempty, $\mathsf{dep}(l) > d$, $\mathsf{dep}(r) > d$, $p\|0 \preceq \mathsf{reg}(l)$, and $p\|1 \preceq \mathsf{reg}(r)$. The trees $\varepsilon$ and $\mathsf{Leaf}(k,v)$ are valid.
 \end{definition}
 
-The validity conditions are local: one condition per edge. The next three results separate their global consequences from the stronger persistence facts needed only for completeness.
+The validity conditions are local: one condition per edge. The next three results separate their global consequences from the stronger persistence facts needed only for completeness. For a finite partial map $M$ and a bit string $q$, write
+\[
+  M_q = \{\,k \mapsto v \in M \mid q \preceq k\,\}
+\]
+for the restriction of $M$ to the key-space cone below $q$.
 
 \begin{lemma}[Local-to-global shape]
 \label{lem:shape}
@@ -691,7 +711,8 @@ Let $T$ be a valid tree. Then:
 \begin{enumerate}[nosep,label=(\roman*)]
   \item every leaf key extends the region of each of its ancestors, and distinct leaves carry distinct keys; hence $T$ represents the partial map $\mathsf{map}(T) = \{k \mapsto v \mid \mathsf{Leaf}(k,v) \in T\}$;
   \item at every junction, the region $p$ is the longest common prefix of the keys below it;
-  \item the left-to-right leaf order of $T$ is the strictly increasing key order.
+  \item the left-to-right leaf order of $T$ is the strictly increasing key order;
+  \item every subtree $U$ of $T$ with region $\varrho = \mathsf{reg}(U)$ satisfies $\mathsf{map}(U) = \mathsf{map}(T)_\varrho$ (the \emph{cone identity}).
 \end{enumerate}
 \end{lemma}
 \begin{proof}
@@ -700,13 +721,9 @@ Let $T$ be a valid tree. Then:
 (ii) Every key below $\mathsf{Node}(d,p,l,r)$ extends $p$. Both children are nonempty, so some key below extends $p\|0$ and some extends $p\|1$. The common prefix therefore ends after exactly the $d$ bits of $p$.
 
 (iii) At every junction, keys on the left have bit $0$ and keys on the right have bit $1$ at position $d$, and both sides agree on the first $d$ bits. So every left key precedes every right key, and the claim follows by induction.
-\end{proof}
 
-For a finite partial map $M$ and a bit string $q$, write
-\[
-  M_q = \{\,k \mapsto v \in M \mid q \preceq k\,\}
-\]
-for the restriction of $M$ to the key-space cone below $q$.
+(iv) By (i), every key below $U$ extends $\varrho$, so $\mathsf{map}(U) \subseteq \mathsf{map}(T)_\varrho$. Conversely, suppose a leaf with key $k$, $\varrho \preceq k$, lies outside $U$. The lowest common ancestor of that leaf and $U$ is a junction at some depth $d < \mathsf{dep}(U) = |\varrho|$, and by (i) applied to its two sides, $\varrho$ and $k$ differ at bit $d$, contradicting $\varrho \preceq k$.
+\end{proof}
 
 \begin{proposition}[Unique representation]
 \label{prop:unique}
@@ -720,9 +737,7 @@ Conversely, Lemma~\ref{lem:shape}(ii) forces any valid root representing $M$ to 
 
 \begin{lemma}[Extension persistence]
 \label{lem:persist}
-Let $M$ and $B$ be finite partial maps with disjoint domains.
-For any finite partial map $A$, a subtree with region $\varrho$ in
-$\mathsf{Tree}(A)$ represents exactly $A_\varrho$. Moreover:
+Let $M$ and $B$ be finite partial maps with disjoint domains. Then:
 \begin{enumerate}[nosep,label=(\roman*)]
   \item $\mathsf{Tree}(M)$ contains a junction with region $p$ iff $M_{p\|0} \neq \emptyset \neq M_{p\|1}$;
   \item every junction of $\mathsf{Tree}(M)$ persists, with the same depth and region, in $\mathsf{Tree}(M \uplus B)$;
@@ -730,13 +745,11 @@ $\mathsf{Tree}(A)$ represents exactly $A_\varrho$. Moreover:
 \end{enumerate}
 \end{lemma}
 \begin{proof}
-First consider a subtree $U$ with region $\varrho$ in $\mathsf{Tree}(A)$. Lemma~\ref{lem:shape}(i) shows that every key below $U$ extends $\varrho$. Conversely, key-directed descent places every key of $A_\varrho$ below $U$. Hence $\mathsf{map}(U)=A_\varrho$.
-
-(i) For the forward direction, the cone identity just proved and the two nonempty children supply keys extending $p\|0$ and $p\|1$. Conversely, suppose both restricted maps are nonempty and descend from the root of $\mathsf{Tree}(M)$. At a current junction with region $q$, the two selected key sets lie below it, so Lemma~\ref{lem:shape}(ii) gives $q \preceq p$. If $q \neq p$, all keys extending $p$ select the same child at depth $|q|$; recurse into that child. Depths increase, the two selected sets prevent termination at a leaf, and the descent therefore reaches the junction with region $p$.
+(i) For the forward direction, the cone identity (Lemma~\ref{lem:shape}(iv)) and the two nonempty children supply keys extending $p\|0$ and $p\|1$. Conversely, suppose both restricted maps are nonempty and descend from the root of $\mathsf{Tree}(M)$. At a current junction with region $q$, the two selected key sets lie below it, so Lemma~\ref{lem:shape}(ii) gives $q \preceq p$. If $q \neq p$, all keys extending $p$ select the same child at depth $|q|$; recurse into that child. Depths increase, the two selected sets prevent termination at a leaf, and the descent therefore reaches the junction with region $p$.
 
 (ii) The condition in (i) is monotone under extension from $M$ to $M \uplus B$, and a junction's depth is the length of its region.
 
-(iii) Suppose first that the node occurs in $\mathsf{Tree}(M)$. A junction persists by (ii), while a leaf persists because its binding remains in the extended map. Conversely, suppose the node occurs in $\mathsf{Tree}(M \uplus B)$. If it is a junction, the two sides of $(M \uplus B)_\varrho$ are nonempty; because $B_\varrho=\emptyset$, clause (i) places the same junction in $\mathsf{Tree}(M)$. If it is a leaf, its binding belongs to $M$ and the same leaf occurs in $\mathsf{Tree}(M)$. In either direction, the two rooted subtrees represent the same map
+(iii) Suppose first that the node occurs in $\mathsf{Tree}(M)$. A junction persists by (ii), while a leaf persists because its binding remains in the extended map. Conversely, suppose the node occurs in $\mathsf{Tree}(M \uplus B)$. If it is a junction, the two sides of $(M \uplus B)_\varrho$ are nonempty; because $B_\varrho=\emptyset$, clause (i) places the same junction in $\mathsf{Tree}(M)$. If it is a leaf, its binding belongs to $M$ and the same leaf occurs in $\mathsf{Tree}(M)$. In either direction, by the cone identity the two rooted subtrees represent the same map
 \[
   (M \uplus B)_\varrho=M_\varrho.
 \]
@@ -755,8 +768,8 @@ Opening trees are generated by
 with $c \in \{0,1\}^{\lambda}$ and the other operands as in Definition~\ref{def:tree}. Evaluation mirrors $\mathsf{dig}$: writing $e_x = \mathsf{eval}(F_x)$,
 \begin{align*}
 \mathsf{eval}(\mathsf{Hole}(c)) &= c,\\
-\mathsf{eval}(\mathsf{OLeaf}(k,v)) &= H(\texttt{0x00} \| k \| v),\\
-\mathsf{eval}(\mathsf{ONode}(d,p,F_l,F_r)) &= H(\texttt{0x01} \| \langle d\rangle \| \langle p\rangle \| e_l \| e_r).
+\mathsf{eval}(\mathsf{OLeaf}(k,v)) &= \mathsf{LeafHash}(k,v),\\
+\mathsf{eval}(\mathsf{ONode}(d,p,F_l,F_r)) &= \mathsf{NodeHash}(d,p,e_l,e_r).
 \end{align*}
 \end{definition}
 
@@ -792,11 +805,11 @@ with $k'\in\mathcal{K}$, $v'\in\mathcal{V}$ and every $s_j\in\{0,1\}^{\lambda}$.
 \]
 and the order is from the leaf toward the root. There is in addition one distinguished empty certificate $C^\mathsf{inc}_\emptyset$.
 
-To verify $C^\mathsf{inc}$ for a target key $k$ against $r$, set $c_0=H(\texttt{0x00}\|k'\|v')$ and, for $j=1,\ldots,m$, require $k[d_j]=k'[d_j]$ and compute
+To verify $C^\mathsf{inc}$ for a target key $k$ against $r$, set $c_0=\mathsf{LeafHash}(k',v')$ and, for $j=1,\ldots,m$, require $k[d_j]=k'[d_j]$ and compute
 \[
 c_j = \begin{cases}
-H(\texttt{0x01}\|\langle d_j\rangle\|\langle p_j\rangle\|c_{j-1}\|s_j) & \text{if } k'[d_j] = 0,\\
-H(\texttt{0x01}\|\langle d_j\rangle\|\langle p_j\rangle\|s_j\|c_{j-1}) & \text{if } k'[d_j] = 1,
+\mathsf{NodeHash}(d_j,p_j,c_{j-1},s_j) & \text{if } k'[d_j] = 0,\\
+\mathsf{NodeHash}(d_j,p_j,s_j,c_{j-1}) & \text{if } k'[d_j] = 1,
 \end{cases}
 \]
 where $p_j=k'[0..d_j)$. Accept iff every requirement holds and $c_m=r$; when $m=0$, this means accepting iff $c_0=r$. The empty certificate $C^\mathsf{inc}_\emptyset$ accepts iff $r=\varnothing$. Any unmet requirement rejects.
@@ -839,9 +852,7 @@ A valid root-to-leaf path has strictly increasing depths in $\{0,\ldots,\kappa\}
 \subsection{Single-Insertion Updates}
 \label{sec:single-key}
 
-Reduced to its simplest form, a round of the accumulator records one binding: the operator submits $(k,v)$ together with a non-inclusion certificate for $k$, the verifier checks the certificate against the current root, and the next root is read off the same certificate. This subsection develops that protocol into a complete security argument. It needs nothing beyond the certificates just defined: the post-state is \emph{computed} from the pre-state rather than supplied by the prover, so the argument never has to check a structural property of prover-supplied data, and the region commitment of the node hash carries no weight in it (Remark~\ref{rem:derived-vs-checked}). The batch transcript of Section~\ref{sec:stack-verifier} then appears as what it is: a compression of this protocol, paid for with the placement checks whose sufficiency Section~\ref{sec:consistency-theorem} proves (Remark~\ref{rem:single-key-border}).
-
-Throughout, $\mathsf{lcp}(x,y)$ denotes the longest common prefix of the bit strings $x$ and $y$.
+Reduced to its simplest form, a round of the accumulator records one binding: the operator submits $(k,v)$ together with a non-inclusion certificate for $k$, the verifier checks the certificate against the current root, and the next root is read off the same certificate. This subsection develops that protocol into a complete security argument. It needs nothing beyond the certificates just defined: the post-state is \emph{computed} from the pre-state rather than supplied by the prover, so the argument never has to check a structural property of prover-supplied data, and the region commitment of the node hash carries no weight in it (Remark~\ref{rem:derived-vs-checked}). The batch transcript of Section~\ref{sec:stack-verifier} is then a compression of this protocol, paid for with the placement checks whose sufficiency Section~\ref{sec:consistency-theorem} proves (Remark~\ref{rem:single-key-border}).
 
 \begin{definition}[Insertion]
 \label{def:insert}
@@ -887,42 +898,40 @@ Lemma~\ref{lem:insert-canon} is what makes insertion order irrelevant: iterated 
 
 \begin{definition}[Update reading]
 \label{def:update-read}
-Let $C = \bigl((d_1,s_1),\ldots,(d_m,s_m);(k',v')\bigr)$ be a certificate (Definition~\ref{def:inclusion-cert}) with terminal key $k' \neq k$, and let $v \in \mathcal{V}$. Put $\ell = H(\texttt{0x00}\|k\|v)$, $\hat p = \mathsf{lcp}(k,k')$, $\hat d = |\hat p|$, and let $c_0,\ldots,c_m$ be the digests of Definition~\ref{def:inclusion-cert}, which depend only on the certificate. Let $t$ be the number of indices $j$ with $d_j > \hat d$; since the depths decrease, these are $j = 1,\ldots,t$. Define
+Let $C = \bigl((d_1,s_1),\ldots,(d_m,s_m);(k',v')\bigr)$ be a certificate (Definition~\ref{def:inclusion-cert}), let $k \in \mathcal{K}$ with $k \neq k'$, and let $v \in \mathcal{V}$. Put $\hat p = \mathsf{lcp}(k,k')$ and $\hat d = |\hat p|$, let $c_0,\ldots,c_m$ be the digests of Definition~\ref{def:inclusion-cert}, which depend only on the certificate, and let $t$ be the number of indices $j$ with $d_j > \hat d$; since the depths decrease, these are $j = 1,\ldots,t$. The \emph{derived certificate} replaces the openings deeper than $\hat d$ by a single opening at $\hat d$ whose sibling digest is $c_t$, and the terminal by the new binding:
 \[
-  a_t =
-  \begin{cases}
-    H(\texttt{0x01}\|\langle\hat d\rangle\|\langle\hat p\rangle\|\ell\|c_t) & k[\hat d]=0,\\
-    H(\texttt{0x01}\|\langle\hat d\rangle\|\langle\hat p\rangle\|c_t\|\ell) & k[\hat d]=1,
-  \end{cases}
+  C^{+} = \bigl((\hat d,\,c_t),\ (d_{t+1},s_{t+1}),\ldots,(d_m,s_m);\ (k,v)\bigr);
 \]
-and, for $j = t+1,\ldots,m$, with $p_j = k'[0..d_j)$,
-\[
-  a_j =
-  \begin{cases}
-    H(\texttt{0x01}\|\langle d_j\rangle\|\langle p_j\rangle\|a_{j-1}\|s_j) & k'[d_j]=0,\\
-    H(\texttt{0x01}\|\langle d_j\rangle\|\langle p_j\rangle\|s_j\|a_{j-1}) & k'[d_j]=1.
-  \end{cases}
-\]
-The \emph{update reading} of the certificate is $\mathsf{next}(C;k,v) = a_m$; for the empty certificate, $\mathsf{next}(C^\mathsf{inc}_\emptyset;k,v) = \ell$.
+for the empty certificate, $C^{+} = \bigl(\,;(k,v)\bigr)$. The \emph{update reading} $\mathsf{next}(C;k,v)$ is the unique root against which $C^{+}$ verifies for the target key $k$. If some $d_j$ equals $\hat d$, then $C^{+}$ is malformed and the update reading is undefined.
 \end{definition}
 
-The update reading is total exactly on the certificates that can certify non-inclusion ($k' \neq k$, or empty); a certificate whose terminal key is $k$ certifies that $k$ is already recorded, and the round is refused. It shares its recursion with verification, so a verifier computes the $c_j$ and $a_j$ in one pass over the certificate; $\mathsf{next}$ itself compares nothing against any root. Theorem~\ref{thm:update} is what licenses reading it once verification against the previous root has succeeded.
+The bit requirements of Definition~\ref{def:inclusion-cert} are vacuous for $C^{+}$---its terminal key is the target key---so $C^{+}$ verifies against exactly one root, the final digest of its fold; $\mathsf{next}$ itself compares nothing against any root. The undefined cases are exactly the certificates that cannot participate in an insertion of $k$: a terminal key $k' = k$ certifies that $k$ is already recorded, and an opening at depth $\hat d$ violates the requirement $k[\hat d] = k'[\hat d]$, so such a $C$ verifies for $k$ against no root. The two folds share their recursion, so a verifier computes the digests of $C$ and $C^{+}$ in one pass. Theorem~\ref{thm:update} is what licenses reading the new root off $C^{+}$ once verification of $C$ against the previous root has succeeded.
 
 \begin{theorem}[Single-insertion update]
 \label{thm:update}
-Let $M$ be a finite partial map and $T = \mathsf{Tree}(M)$, and let a certificate $C$ with terminal key $k' \neq k$, or the empty certificate, verify for $k$ against $\mathsf{dig}(T)$. Then $k \notin \mathrm{dom}(M)$ and, for every $v \in \mathcal{V}$,
+Let $M$ be a finite partial map and $T = \mathsf{Tree}(M)$, let $k \in \mathcal{K}$, and let a certificate $C$ with terminal key $k' \neq k$, or the empty certificate, verify for $k$ against $\mathsf{dig}(T)$. Then $k \notin \mathrm{dom}(M)$ and, for every $v \in \mathcal{V}$,
 \[
   \mathsf{next}(C;k,v) = \mathsf{dig}\bigl(\mathsf{Tree}(M \uplus \{k \mapsto v\})\bigr).
 \]
 \end{theorem}
 \begin{proof}
-The empty certificate verifies only against $r = \varnothing$, so $T = \varepsilon$ and $M = \emptyset$, and $\mathsf{next} = \ell = \mathsf{dig}(\mathsf{Tree}(\{k \mapsto v\}))$.
+The empty certificate verifies only against $r = \varnothing$, so $T = \varepsilon$ and $M = \emptyset$; here $C^{+}$ is the terminal-only certificate $(\,;(k,v))$, which verifies against $\mathsf{LeafHash}(k,v) = \mathsf{dig}(\mathsf{Tree}(\{k \mapsto v\}))$.
 
 Let $C$ be nonempty. Theorem~\ref{thm:inclusion-cert}(i) gives $k \notin \mathrm{dom}(M)$, and its proof, through Lemma~\ref{lem:match}, identifies the openings of $C$ with the ancestors of $\mathsf{Leaf}(k',v')$ in $T$: the opening at depth $d_j$ coincides with the ancestor junction at that depth, $c_j$ is that junction's digest, $p_j = k'[0..d_j)$ is its true region (Lemma~\ref{lem:shape}(ii)), and $s_j$ is the digest of its subtree on the side away from $k'$. The openings list \emph{every} ancestor, because each opening's on-path child digest is the recomputed $c_{j-1}$, making consecutive openings parent and child in $T$.
 
-No opening has depth $\hat d$: verification requires $k[d_j] = k'[d_j]$, and $k[\hat d] \neq k'[\hat d]$. Hence the ancestors at depths $d_1,\ldots,d_t$ have regions containing the position $\hat d$, so none of them is a prefix of $k$, while the ancestors at depths $d_{t+1},\ldots,d_m$ have regions $p_j \preceq \hat p \preceq k$.
+No opening has depth $\hat d$: verification requires $k[d_j] = k'[d_j]$, and $k[\hat d] \neq k'[\hat d]$. Hence $C^{+}$ is well formed, the ancestors at depths $d_1,\ldots,d_t$ have regions containing the position $\hat d$, so none of them is a prefix of $k$, and the ancestors at depths $d_{t+1},\ldots,d_m$ have regions $p_j \preceq \hat p \preceq k$.
 
-Now run $\mathsf{ins}(T;k,v)$ and compare with Definition~\ref{def:update-read}. At the ancestors of depths $d_m,\ldots,d_{t+1}$, taken root downward, clause~4 of Definition~\ref{def:insert} applies and descends on side $k[d_j] = k'[d_j]$, toward $\mathsf{Leaf}(k',v')$. The next node $U$ on that path is the ancestor at depth $d_t$, or the terminal leaf itself if $t = 0$. The region of $U$ agrees with $k'$ on at least the first $\hat d + 1$ bits, so $\mathsf{lcp}(\mathsf{reg}(U),k) = \mathsf{lcp}(k',k) = \hat p$, and clause~3 grafts $\mathsf{Node}(\hat d,\hat p,\cdot,\cdot)$ over $\mathsf{Leaf}(k,v)$ and $U$, with the new leaf on side $k[\hat d]$. Recomputing digests bottom-up: $\mathsf{dig}(U) = c_t$, the graft junction hashes to $a_t$, and the ancestors above it recombine with the same depths, regions, and sibling digests, giving $a_j$ at depth $d_j$. Hence $\mathsf{dig}(\mathsf{ins}(T;k,v)) = a_m = \mathsf{next}(C;k,v)$, and Lemma~\ref{lem:insert-canon} identifies $\mathsf{ins}(T;k,v)$ as $\mathsf{Tree}(M \uplus \{k \mapsto v\})$.
+Now run $\mathsf{ins}(T;k,v)$. At the ancestors of depths $d_m,\ldots,d_{t+1}$, taken root downward, clause~4 of Definition~\ref{def:insert} applies and descends on side $k[d_j] = k'[d_j]$, toward $\mathsf{Leaf}(k',v')$. The next node $U$ on that path is the ancestor at depth $d_t$, or the terminal leaf itself if $t = 0$; its region agrees with $k'$ on at least the first $\hat d + 1$ bits, so $\mathsf{lcp}(\mathsf{reg}(U),k) = \mathsf{lcp}(k',k) = \hat p$, and clause~3 grafts $\mathsf{Node}(\hat d,\hat p,\cdot,\cdot)$ over $\mathsf{Leaf}(k,v)$ and $U$, with the new leaf on side $k[\hat d]$. By Lemma~\ref{lem:insert-canon}, $\mathsf{ins}(T;k,v) = \mathsf{Tree}(M \uplus \{k \mapsto v\})$.
+
+In $\mathsf{ins}(T;k,v)$, the ancestors of $\mathsf{Leaf}(k,v)$ are the graft junction at depth $\hat d$, whose sibling subtree is $U$ with $\mathsf{dig}(U) = c_t$, and above it the junctions at depths $d_{t+1},\ldots,d_m$, whose sibling subtrees are unchanged with digests $s_j$. The certificate that Theorem~\ref{thm:inclusion-cert}(ii) constructs from this path is therefore exactly $C^{+}$, and it verifies against $\mathsf{dig}(\mathsf{ins}(T;k,v))$. Since $C^{+}$ verifies against a unique root, $\mathsf{next}(C;k,v) = \mathsf{dig}(\mathsf{ins}(T;k,v))$.
+\end{proof}
+
+\begin{corollary}[Derived inclusion certificate]
+\label{cor:derived-cert}
+In the setting of Theorem~\ref{thm:update}, $C^{+}$ is a verifying inclusion certificate for $(k,v)$ against the new root $\mathsf{next}(C;k,v)$---the certificate that Theorem~\ref{thm:inclusion-cert}(ii) constructs from $\mathsf{Tree}(M \uplus \{k \mapsto v\})$. The operator can therefore serve the inclusion certificate for a freshly recorded binding by this local transformation of the consumed non-inclusion certificate, without access to the tree.
+\end{corollary}
+\begin{proof}
+This is the identification made in the closing paragraph of the proof of Theorem~\ref{thm:update}.
 \end{proof}
 
 \begin{definition}[Certified single-insertion run]
@@ -941,7 +950,7 @@ In a certified run the keys $k_1,\ldots,k_n$ are pairwise distinct and, with $M_
 Induction on $i$; the base is $r_0 = \varnothing = \mathsf{dig}(\mathsf{Tree}(\emptyset))$. If $r_{i-1} = \mathsf{dig}(\mathsf{Tree}(M_{i-1}))$, then Theorem~\ref{thm:update} applied to $C_i$ gives $k_i \notin \mathrm{dom}(M_{i-1})$---so the keys remain distinct and $M_i$ is a partial map---and $r_i = \mathsf{dig}(\mathsf{Tree}(M_i))$.
 \end{proof}
 
-The witness maps $M_i$ are computed from the accepted transcript itself, so the knowledge required by Definition~\ref{def:append-only-accumulator}(i) is explicit; nothing is assumed about what the operator knows. The protocol is complete as well as sound: for $k \notin \mathrm{dom}(M_{i-1})$ the operator produces a verifying certificate by the descent construction of Theorem~\ref{thm:inclusion-cert}(ii), and Theorem~\ref{thm:update} guarantees that the root it leads to is the canonical one.
+The witness maps $M_i$ are computed from the accepted transcript itself, which discharges clause~(i) of Definition~\ref{def:append-only-accumulator} in its literal form; nothing is assumed about what the operator knows. The protocol is complete as well as sound: for $k \notin \mathrm{dom}(M_{i-1})$ the operator produces a verifying certificate by the descent construction of Theorem~\ref{thm:inclusion-cert}(ii), and Theorem~\ref{thm:update} guarantees that the root it leads to is the canonical one.
 
 \begin{corollary}[The run is append-only]
 \label{cor:run-append}
@@ -953,7 +962,7 @@ By Theorem~\ref{thm:run}, $r_i$ commits $\mathsf{Tree}(M_i)$ with $M_i \supseteq
 
 \begin{remark}[Derived, not checked]
 \label{rem:derived-vs-checked}
-In this protocol the post-state is a function of the pre-state: it is $\mathsf{ins}(T;k,v)$, and the certificate contributes no node to it. Nothing is reconstructed from data chosen by the untrusted operator, so the development needs no validity predicate over anything the operator sends: validity of every state tree is a theorem (Theorem~\ref{thm:run} exhibits the states as $\mathsf{Tree}(M_i)$), and the junction regions used in verification are derived from the terminal key, their correctness being a conclusion of Lemma~\ref{lem:match} rather than a check. The same holds for the user-facing certificates themselves: inclusion and non-inclusion verification (Definition~\ref{def:inclusion-cert}) involves no region locking. Indeed, no statement in this subsection or in Theorem~\ref{thm:inclusion-cert} uses the region operand of the junction hash---all of them would remain valid over a junction hash committing the depth alone. The region commitment is needed exactly where tree shape is imported from the untrusted aggregator: the batch transcript attaches opaque preserved subtrees at prover-claimed positions, and there coherent placement must be \emph{checked}, which is what the region commitment makes locally checkable (Remark~\ref{rem:placement}).
+In this protocol the post-state is a function of the pre-state: it is $\mathsf{ins}(T;k,v)$, and the certificate contributes no node to it. Nothing is reconstructed from data chosen by the untrusted operator, so the development needs no validity predicate over anything the operator sends: validity of every state tree is a theorem (Theorem~\ref{thm:run} exhibits the states as $\mathsf{Tree}(M_i)$), and the junction regions used in verification are derived from the terminal key, their correctness being a conclusion of Lemma~\ref{lem:match} rather than a check. The same holds for the user-facing certificates themselves: inclusion and non-inclusion verification (Definition~\ref{def:inclusion-cert}) involves no region locking. Indeed, no statement in this subsection or in Theorem~\ref{thm:inclusion-cert} uses the region operand of the junction hash---all of them would remain valid over a junction hash committing the depth alone, with Lemma~\ref{lem:match} then pinning depths and child digests only and the regions recovered from the matched tree through Lemma~\ref{lem:shape}(ii). The region commitment is needed exactly where tree shape is imported from the untrusted aggregator: the batch transcript attaches opaque preserved subtrees at prover-claimed positions, and there coherent placement must be \emph{checked}, which is what the region commitment makes locally checkable (Remark~\ref{rem:placement}).
 \end{remark}
 
 \begin{remark}[From one key to a batch]
@@ -1001,24 +1010,19 @@ and $\mathsf{adv}(N(d, P_l, P_r)) = (d, p)$ with the \emph{derived region} $p = 
 
 The \emph{old digest} attribute is
 \begin{align*}
-\mathsf{old}(S(c)) &= c,\\
-\mathsf{old}(O(d,p,c_l,c_r)) &= H(\texttt{0x01}\|\langle d\rangle\|\langle p\rangle\|c_l\|c_r),\\
-\mathsf{old}(O_L(k,v)) &= H(\texttt{0x00}\|k\|v),\\
+\mathsf{old}(S(c)) &= c, &
+\mathsf{old}(O(d,p,c_l,c_r)) &= \mathsf{NodeHash}(d,p,c_l,c_r),\\
+\mathsf{old}(O_L(k,v)) &= \mathsf{LeafHash}(k,v), &
 \mathsf{old}(L(k,v)) &= \varnothing,
 \end{align*}
-and, for a junction $N = N(d, P_l, P_r)$ with derived region $p$, writing $o_x = \mathsf{old}(P_x)$, the \emph{four-way rule}
+and, for a junction $N = N(d, P_l, P_r)$ with derived region $p$, writing $o_x = \mathsf{old}(P_x)$,
 \[
-\mathsf{old}(N) = \begin{cases}
-\varnothing & o_l = o_r = \varnothing,\\
-o_r & o_l = \varnothing \neq o_r,\\
-o_l & o_r = \varnothing \neq o_l,\\
-H(\texttt{0x01}\|\langle d\rangle\|\langle p\rangle\|o_l\|o_r) & \text{otherwise}.
-\end{cases}
+\mathsf{old}(N) = \mathsf{HashPreState}(d,p,o_l,o_r),
 \]
-The \emph{new digest} attribute equals $\mathsf{old}$ on $S$, $O$, and $O_L$; further, writing $n_x = \mathsf{new}(P_x)$,
+the \emph{four-way rule} of Equation~\eqref{eq:hash-pre-state}. The \emph{new digest} attribute equals $\mathsf{old}$ on $S$, $O$, and $O_L$; further, writing $n_x = \mathsf{new}(P_x)$,
 \begin{align*}
-\mathsf{new}(L(k,v)) &= H(\texttt{0x00}\|k\|v),\\
-\mathsf{new}(N(d,P_l,P_r)) &= H(\texttt{0x01}\|\langle d\rangle\|\langle p\rangle\|n_l\|n_r).
+\mathsf{new}(L(k,v)) &= \mathsf{LeafHash}(k,v),\\
+\mathsf{new}(N(d,P_l,P_r)) &= \mathsf{NodeHash}(d,p,n_l,n_r).
 \end{align*}
 
 The predicate $\mathsf{ok}(P)$ holds if every junction $N(d, P_l, P_r)$ in $P$ satisfies:
@@ -1106,7 +1110,7 @@ If $U$ is preserved, then $M[U]=\mathsf{map}(U)$ and Proposition~\ref{prop:uniqu
 
 Let $U=\mathsf{Node}(d,p,U_l,U_r)$ emit $Q=N(d,Q_l,Q_r)$ and apply the induction hypothesis to its children. At least one child term is not $S$: otherwise both child subtrees would contain no batch key and the generator would have stopped at $U$. Every advised child carries its true top-node depth and region, so validity of $U$ gives coherence; all advised children yield the true prefix $p$, so agreement holds and $\mathsf{adv}(Q)=(d,p)$.
 
-The cone identity of Lemma~\ref{lem:persist}, applied to $U$ in $T'=\mathsf{Tree}(M\uplus B)$, says that $U$ contains exactly the bindings below $p$. Key placement at $U$ then gives $M[U_l]=M_{p\|0}$ and $M[U_r]=M_{p\|1}$; these maps partition $M[U]$. If both parts are empty, so is $M[U]$ and the four-way rule returns $\varnothing$. If exactly one part is nonempty, its unique valid tree is also $\mathsf{Tree}(M[U])$, and the rule passes through its digest. If both are nonempty, the two parts contain keys on opposite sides of $p$; the construction in Proposition~\ref{prop:unique} gives
+The cone identity (Lemma~\ref{lem:shape}(iv)), applied to $U$ in $T'=\mathsf{Tree}(M\uplus B)$, says that $U$ contains exactly the bindings below $p$. Key placement at $U$ then gives $M[U_l]=M_{p\|0}$ and $M[U_r]=M_{p\|1}$; these maps partition $M[U]$. If both parts are empty, so is $M[U]$ and the four-way rule returns $\varnothing$. If exactly one part is nonempty, its unique valid tree is also $\mathsf{Tree}(M[U])$, and the rule passes through its digest. If both are nonempty, the two parts contain keys on opposite sides of $p$; the construction in Proposition~\ref{prop:unique} gives
 \[
   \mathsf{Tree}(M[U])
   = \mathsf{Node}(d,p,\mathsf{Tree}(M[U_l]),\mathsf{Tree}(M[U_r])),
@@ -1217,7 +1221,7 @@ Canonical input digits and all three leaf permutations are fused into $L$ table,
 The arithmetization is split across seven AIR tables that share one batch-STARK commitment. Each table is padded independently to a power-of-two height. All per-round witness values are in main traces; preprocessing consists only of verifier-reconstructible row indices, real-row and permutation-mode masks, and fixed lookup tables derived from the protocol version and the public scalar shape.
 
 \begin{description}[nosep]
-    \item[Table A (opcode execution)] has one row per opcode and a one-hot selector columns for $S$\slash$O$\slash$O_L$\slash$L$\slash$N$. A row carries the old and new digests, the old-digest absence bit, advice $(\delta,\varrho)$, and the start index of its post-order subtree. Local rules implement the base-opcode semantics; the last real row binds the execution to $(r_{i-1},r_i)$ and the public old-root absence flag.
+    \item[Table A (opcode execution)] has one row per opcode and one-hot selector columns for $S$\slash$O$\slash$O_L$\slash$L$\slash$N$. A row carries the old and new digests, the old-digest absence bit, advice $(\delta,\varrho)$, and the start index of its post-order subtree. Local rules implement the base-opcode semantics; the last real row binds the execution to $(r_{i-1},r_i)$ and the public old-root absence flag.
     \item[Table B (Poseidon2)] is the sole evaluator of every Poseidon2 permutation requested by the other tables, using eight vector lanes per row. It records occurrences rather than distinct inputs: two logically separate equal calls occupy multiplicity two. Feed-forward calls expose the full 16-element output, while terminal calls expose only the eight-element digest used by the RSMT.
     \item[Table L (canonical leaves)] has one row for every new leaf $L$ and opened leaf $O_L$. Twenty-six radix-$2^{10}$ digits each for the key and value reconstruct the nine field limbs of an exact 32-byte string; the digits are range-checked, and the reconstructed limbs feed all three steps of the leaf sponge. The row returns the digest together with the key limbs to its Table~A row. The different old-state semantics of $L$ and $O_L$ are imposed in A, so L needs no ``kind'' column.
     \item[Table J (junction joins)] has one row per $N$. It consumes the two child tuples, proves their contiguous post-order locations, derives their common parent region, checks increasing depth and the left/right divergence bit, and enforces confinement whenever the junction is new. The old digest follows the four cases $00/01/10/11$ (empty, right passthrough, left passthrough, or old-child hash) of Formula~\ref{eq:hash-pre-state} (the four-way-rule); the new side always hashes both new children. One node-prefix permutation is shared locally between the old and new child blocks when both are needed.
@@ -1264,7 +1268,7 @@ The proof system uses BabyBear and its degree-four extension for the AIR and Log
 \subsection{Measured Performance}
 \label{sec:measured}
 
-Hardware: 10-core Apple M1 Pro; release build with utilizing the 8 better CPU cores; one consistency proof per row.
+Hardware: 10-core Apple M1 Pro; release build utilizing the 8 performance cores; one consistency proof per row.
 
 \begin{table}[ht]
 \centering
@@ -1436,110 +1440,9 @@ The honest-quorum assumption on the BFT Core is thereby removed from the correct
 
 Succinct argument systems offer a powerful method for proving the execution of a computation, in our case, checking consistency proofs of a distributed cryptographic data structure. For use cases with small changesets, a simple hash-based proof, whose size is linear in the batch size, is optimal. However, as batch sizes increase and bandwidth becomes a constraint, the constant or near-constant size proofs generated by STARK systems become more advantageous.
 
-Different proof systems offer different trade-offs. The relevant properties are proving effort, necessity (and generality) of trusted setup, interactivity, recursion-friendliness, and the maturity and trustworthiness of available tooling. STARKs are comparatively fast to prove but have larger proofs, and avoid undesirable properties such as trusted setup. Groth16 SNARKs produce small proofs but require more proving effort and a circuit-specific trusted setup. For more complex applications, hybrid approaches and proof recursion can be employed. Figure~\ref{fig:comp} illustrates the proof size trade-off.
-
 A second axis of optimization is the scope of the in-circuit statement itself. Drawing that scope correctly requires care: the seemingly sufficient structure-only statement admits a concrete cross-round equivocation attack (Remark~\ref{rem:placement}). The right kernel---\emph{append-only consistency}, i.e., prior-state preservation plus coherent placement of insertions, made locally checkable by the region-committing node hash---is proved sufficient in Theorem~\ref{thm:history}, while completeness and service properties remain self-policed by the protocol around the public root. This still turns a verification problem that naively would require reconstructing the globally unique tree shape into one with a tight, hand-built AIR. The result is the measured proving throughput reported in Section~\ref{sec:measured}: a single Aggregator on a single CPU sustainably exceeds $10\,000$ insertions per second with a 1.7\,MB transparent proof and tens of milliseconds verification time. This shows that operating a very large-scale Aggregation Layer with cryptographically verified updates is practical today, with no GPU farm or trusted setup, and on a power budget compatible with commodity hardware.
 
 Above the per-round proofs sits the aggregation mechanism of Section~\ref{sec:aggregation-audit}: the consistency proofs of all shards and the Consensus Layer's own state transitions are folded, by recursion on a zkVM, into a single fixed-size transparent proof of the correctness of the system's entire operating history. The two validation paths complement each other. The pragmatic path, anchored in the Unicity Trust Base, delivers finality within seconds under the standard BFT quorum assumption; the audit path, available with a delay of minutes to hours, retrospectively removes that assumption from the correctness of the recorded history. The consistency-proof mechanism now carries a formal correctness proof (Theorem~\ref{thm:history} and its corollaries), built in two tiers: a single-insertion theory in which a non-inclusion certificate alone drives each update and no placement check is needed at all (Section~\ref{sec:single-key}), and the batched transcript whose placement checks are proved to enforce the same map-level guarantee. In both tiers, append-only consistency of the entire certified history reduces to the collision resistance of the underlying hash function. A machine-checked formalization of this proof is the natural next step.
-
-\begin{figure}[!htbp]
-    \centering
-\begin{tikzpicture}[diagram]
-\begin{axis}[
-axis lines = left,
-axis line style={->},
-xlabel = {Inclusion batch size},
-ylabel = {Proof size},
-xmin=0, xmax=10,
-ymin=0, ymax=10,
-xtick=\empty,
-ytick=\empty,
-]
-\addplot [red, thick, smooth] coordinates {(0,0)  (5.5, 5)};
-\addplot [red, thick, dotted] coordinates {(5.5, 5)  (10,9)};
-\node [red, above left] at (axis cs:10,9) {hash-based  consistency proof};
-
-\addplot [purple, thick, smooth] coordinates {(0,2) (7.5,2.8)};
-\addplot [purple, thick, dotted] coordinates {(7.5,2.8) (10,3)};
-\node [purple, above left] at (axis cs:10,3) {STARK};
-
-\addplot [blue, thick, smooth] coordinates {(0,1) (3,1)};
-\addplot [blue, thick, dotted] coordinates {(3,1) (10,1)};
-\node [blue, above left] at (axis cs:10,1) {SNARK (e.g. Groth16)};
-
-% perf limits
-\addplot [dotted, thick] coordinates {(0,5) (10,5)};
-\node [above right] at (axis cs:0,5) {\it bandwidth limit};
-
-\addplot [dashed, thick] coordinates {(3, 0.25) (3, 1.75)}; % snark
-\addplot [dashed, thick] coordinates {(7.5, 2) (7.5, 4.3)};   % stark
-
-\end{axis}
-\end{tikzpicture}
-    \caption{Proof size vs. use of succinct compression. Dotted line is bandwidth limit, dashed line is compute limit (proof-system specific). Not to scale.}\label{fig:comp}
-\end{figure}
-
-\clearpage
-\appendix
-\section{The Complete Verifier}
-\label{app:verifier}
-
-Algorithm~\ref{alg:stackverify} is the complete form of Algorithm~\ref{alg:stackverify-core}: identical, with the operand-domain assertions shown.
-
-\begin{algorithm}[H]
-  \caption{Stack-machine verification of the RSMT consistency proof, complete}\label{alg:stackverify}
-  \scriptsize
-  \begin{algorithmic}[0]
-    \Function{VerifyConsistency}{$\pi, r_{i-1}, r_i, B$}
-      \If{$B = [\,]$}
-        \State \Return $r_{i-1} = r_i \;\land\; \pi = [\,]$
-      \EndIf
-      \State $B \gets \Call{SortTraversalOrder}{B}$
-      \State \textbf{assert} keys of $B$ in $\{0,1\}^{\kappa}$, strictly increasing
-      \State $\mathit{st} \gets [\,]$; \quad $b \gets 0$ \Comment{stack; batch index}
-      \For{opcode $o$ \textbf{in} $\pi$}
-        \If{$o = S(c)$} \Comment{opaque subtree}
-          \State \textbf{assert} $c \in \{0,1\}^{\lambda}$
-          \State \Call{Push}{$\mathit{st}, (c, c, \bot)$}
-        \ElsIf{$o = O(d', p', c_l, c_r)$} \Comment{opening}
-          \State \textbf{assert} $0 \le d' < \kappa \land p' \in \{0,1\}^{d'} \land c_l, c_r \in \{0,1\}^{\lambda}$
-          \State $c \gets H(\texttt{0x01} \| \langle d'\rangle \| \langle p'\rangle \| c_l \| c_r)$
-          \State \Call{Push}{$\mathit{st}, (c, c, (d', p'))$}
-        \ElsIf{$o = O_L(k', v')$} \Comment{opened leaf}
-          \State \textbf{assert} $k' \in \{0,1\}^{\kappa}$
-          \State $c \gets H(\texttt{0x00} \| k' \| v')$
-          \State \Call{Push}{$\mathit{st}, (c, c, (\kappa, k'))$}
-        \ElsIf{$o = L$} \Comment{new leaf}
-          \State $(k, v) \gets B[b]$; \quad $b \gets b + 1$
-          \State \Call{Push}{$\mathit{st}, (\varnothing,\; H(\texttt{0x00} \| k \| v),\; (\kappa, k))$}
-        \ElsIf{$o = N(d)$} \Comment{junction}
-          \State \textbf{assert} $0 \le d < \kappa$
-          \State $(c^{\mathsf o}_r, c^{\mathsf n}_r, a_r) \gets \Call{Pop}{\mathit{st}}$
-          \State $(c^{\mathsf o}_l, c^{\mathsf n}_l, a_l) \gets \Call{Pop}{\mathit{st}}$
-          \State $p \gets \bot$
-          \For{$x \in \{l, r\}$ with side bit $\beta \in \{0, 1\}$}
-            \If{$a_x = (\delta_x, \varrho_x) \neq \bot$} \Comment{coherence}
-              \State \textbf{assert} $\delta_x > d \;\land\; \varrho_x[d] = \beta$
-              \State \textbf{assert} $p = \bot \;\lor\; p = \varrho_x[0..d)$
-              \State $p \gets \varrho_x[0..d)$
-            \EndIf
-          \EndFor
-          \State \textbf{assert} $p \neq \bot$
-          \If{$c^{\mathsf o}_l = \varnothing \lor c^{\mathsf o}_r = \varnothing$} \Comment{new junction}
-            \State \textbf{assert} $a_l \neq \bot \;\land\; a_r \neq \bot$
-          \EndIf
-          \State $c^{\mathsf o} \gets \Call{HashPreState}{d,p,c^{\mathsf o}_l,c^{\mathsf o}_r}$
-          \State $c^{\mathsf n} \gets \Call{NodeHash}{d,p,c^{\mathsf n}_l,c^{\mathsf n}_r}$
-          \State \Call{Push}{$\mathit{st}, (c^{\mathsf o}, c^{\mathsf n}, (d, p))$}
-        \Else
-          \State \Return $0$ \Comment{unknown opcode}
-        \EndIf
-      \EndFor
-      \State \textbf{assert} $b = |B| \;\land\; |\mathit{st}| = 1$
-      \State \Return $\mathit{st}[0].(c^{\mathsf o}, c^{\mathsf n}) = (r_{i-1}, r_i)$
-    \EndFunction
-  \end{algorithmic}
-\end{algorithm}
 
 \bibliographystyle{plain}
 \bibliography{aggregation-layer}

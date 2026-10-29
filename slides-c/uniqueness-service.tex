@@ -1,4 +1,4 @@
-% Conference talk: 20 minutes + questions.
+% Conference talk: 12 minutes + questions.
 % Build: make  (pdflatex via latexmk)
 \documentclass[aspectratio=169,10pt]{beamer}
 
@@ -77,7 +77,7 @@
 }
 \makeatother
 
-\setbeamertemplate{footnote}{\parindent 0em\noindent\raggedright\tiny\insertfootnotetext\par}
+\setbeamertemplate{footnote}{\parindent 0em\noindent\raggedright\usebeamercolor[fg]{footnote}\scriptsize\hbox to 1em{\insertfootnotemark\hfil}\insertfootnotetext\par}
 
 % ---------------------------------------------------------------- diagrams
 \definecolor{preserved}{HTML}{E2E4E7}
@@ -114,57 +114,66 @@
 \section{Motivation}
 % =====================================================================
 
-\begin{frame}{Motivation: the Unicity Network}
+\begin{frame}{Motivation: the minimal online component of a trustless p2p tx system}
 \begin{columns}[T]
-\begin{column}{0.56\textwidth}
+\begin{column}{0.62\textwidth}
+\small
 \begin{itemize}
-  \item Tokens are self-contained data objects kept by their owners. Transactions are executed and validated off-chain by the parties involved.
-  \item There is no global ordering of transactions and no global execution.
-  \item The only globally shared state is the set of spent token states, each recorded under the identifier $k = H(\text{token state})$.
-  \item A transaction is accepted only together with a \alert{proof of unicity}: an inclusion proof of the spent state against a root certified by the consensus layer.
+  \item In the Unicity Network, tokens are data objects kept by their owners. Transactions are executed and validated off-chain, without global ordering or global execution.
+  \item A recipient checks a token history offline: signatures, spending predicates, computational integrity proofs. A state and its proof can be copied, however, without distinnction between a copy and the original.
+  \item The statement \emph{``this state has not been spent before''} cannot be checked from the data object alone. It needs an online record of spent states, with (non-)inclusion proofs against a unique certified trust base.\footnote[frame]{Assuming no trusted hardware (secure elements, TEEs) and an open set of recipients.} This record is the \textbf{minimal online component}.
 \end{itemize}
 \end{column}
-\begin{column}{0.40\textwidth}
+\begin{column}{0.36\textwidth}
 \centering
-\begin{tikzpicture}[layer/.style={box, minimum width=5.2cm, minimum height=1.05cm, font=\small}]
-  \node[layer, fill=preserved] (cl) {\textbf{Consensus Layer}\\[-1pt]\scriptsize State Machine Replication--based certifier};
-  \node[layer, fill=preserved, below=6mm of cl] (al) {\textbf{Aggregation Layer}\\[-1pt]\scriptsize Radix Sparse Merkle Tree: records spent states};
-  \node[layer, fill=recomp, below=13mm of al] (el) {\textbf{Execution Layer}\\[-1pt]\scriptsize p2p transaction};
-  \draw[darr] (cl) -- (al);
-  \draw[darr] (al) -- (el);
-  \draw[dashed, uGrey] ($(al.south west)!0.5!(el.north west)$) -- ($(al.south east)!0.5!(el.north east)$);
-  \node[lbl, anchor=south east, text=uGrey] at ($(al.south east)!0.5!(el.north east)$) {infrastructure};
-  \node[lbl, anchor=north east, text=uGrey] at ($(al.south east)!0.5!(el.north east)$) {off-chain};
+\begin{tikzpicture}[st/.style={box, minimum width=1.0cm, minimum height=0.6cm, font=\small}]
+  \node[st, fill=preserved] (s) at (0,0) {$s$};
+  \node[st, fill=fresh] (s1) at (2.6,0.8) {$s'$};
+  \node[st, fill=attack] (s2) at (2.6,-0.8) {$s''$};
+  \draw[arr] (s) -- node[lbl, above, sloped] {$t_1$} (s1);
+  \draw[arr] (s) -- node[lbl, below, sloped] {$t_2$} (s2);
+  \node[lbl, right=1mm of s1, align=left] {valid $\pi'$};
+  \node[lbl, right=1mm of s2, align=left] {valid $\pi''$};
+  \node[box, fill=fresh, anchor=north, minimum width=4.3cm] (r1) at (1.5,-1.75) {$H(s) \mapsto H(t_1)$: recorded};
+  \node[box, fill=attack, below=1.5mm of r1, minimum width=4.3cm] (r2) {$H(s) \mapsto H(t_2)$: rejected, key is set};
+  \node[lbl, above=0.5mm of r1, text=uGrey] {uniqueness service};
+  \node[lbl, below=1mm of r2, text width=4.3cm, align=center] {The inclusion proof of $H(s) \mapsto H(t_1)$ is the \alert{proof of unicity} of $t_1$.};
 \end{tikzpicture}
 \end{column}
 \end{columns}
-\end{frame}
-
-% ---------------------------------------------------------------------
-\begin{frame}{Motivation: p2p vs online/on-chain transactions}
-\begin{itemize}
-  \item A recipient can check the validity of a token history offline: signatures, spending predicates, computational integrity proofs.
-  \item The statement \emph{``this state has not been spent before''} concerns global view. It cannot be checked based on data object.
-  \item A trustless peer-to-peer transaction system therefore needs an online shared record of consumed states, with inclusion and non-inclusion proofs against a unique certified root.\footnote{Assuming no trusted hardware (secure elements, TEEs) and an open set of recipients.}
-  \item This record is the \textbf{minimal online component} of an otherwise p2p transaction system. Ordering, execution, and data storage can be left to the transacting parties.
-\end{itemize}
-\vspace{2mm}
 \begin{block}{This work}
+\small
 A provably secure implementation of this record as an add-only authenticated dictionary. It can be operated by untrusted parties thanks to cryptographic consistency proofs.
 \end{block}
 \end{frame}
 
-
-
 % ---------------------------------------------------------------------
-\begin{frame}{Setting: an add-only dictionary}
+\begin{frame}{Setting: an add-only dictionary with an untrusted operator}
+\begin{columns}[T]
+\begin{column}{0.56\textwidth}
 \small
 \begin{itemize}
-  \item Key $k = H(\text{state}) \in \K = \{0,1\}^{256}$ identifies a consumed token state. Value $v = H(\text{transaction})$ identifies the transaction that consumed it.
-  \item After round $i$ the service commits to a finite partial map $M_i\colon \K \to \V \cup \{\bot\}$ by the digest $r_i$.
-  \item Add\footnote{unordered}-only: $M_{i-1} \subseteq M_i$. A key is set once and never changed or removed. Insertion order is not retained, so $r_i$ commits to the map.
+  \item Key $k = H(\text{state}) \in \K = \{0,1\}^{256}$ identifies a spent token state. Value $v = H(\text{transaction})$ identifies the transaction that consumed it.
+  \item After round $i$ the digest $r_i$ commits to a finite partial map $M_i\colon \K \to \V \cup \{\bot\}$. Add-only (unordered): $M_{i-1} \subseteq M_i$, and a key is never changed or removed.
+  \item The aggregator is untrusted. The consensus layer (BFT, delegated proof of stake) certifies $r_i$ only if $r_{i-1}$ is the last certified root and the consistency proof $\pi$ verifies. Each root is extended at most once, so the dictionary cannot fork.
 \end{itemize}
+\end{column}
+\begin{column}{0.40\textwidth}
+\centering
+\begin{tikzpicture}
+  \node[box, fill=preserved, minimum width=5.0cm, minimum height=0.65cm] (cl) {Consensus Layer (BFT Core)};
+  \node[box, fill=white, minimum width=3.0cm, minimum height=0.65cm, below=1.05cm of cl] (ag) {Aggregator (RSMT)};
+  \node[box, fill=recomp, minimum width=5.0cm, minimum height=0.65cm, below=1.05cm of ag] (us) {Users (off-chain execution)};
+  \draw[arr] ([xshift=-4mm]ag.north) -- node[lbl, left] {$(r_{i-1}, r_i, \pi)$} ([xshift=-4mm]ag.north |- cl.south);
+  \draw[arr] ([xshift=4mm]ag.north |- cl.south) -- node[lbl, right] {certificate} ([xshift=4mm]ag.north);
+  \draw[arr] ([xshift=-4mm]us.north -| ag.south) -- node[lbl, left] {batch $B_i$} ([xshift=-4mm]ag.south);
+  \draw[arr] ([xshift=4mm]ag.south) -- node[lbl, right, align=left] {(non-)inclusion\\certificates} ([xshift=4mm]us.north -| ag.south);
+\end{tikzpicture}
+\end{column}
+\end{columns}
+
 \vspace{1mm}
+\footnotesize
 \begin{tabular}{@{}llll@{}}
 \toprule
 Proof & Statement & Verified against & Verified by \\
@@ -174,64 +183,18 @@ non-inclusion & $M_i(k) = \bot$ & $r_i$ & recipients \\
 consistency & $M_{i-1} \subseteq M_i$ & $(r_{i-1}, r_i)$ & consensus layer \\
 \bottomrule
 \end{tabular}
-
-\vspace{2mm}
-\begin{block}{Security}
-\footnotesize
-(i) From a consistency proof that verifies against $(r_{i-1}, r_i)$, either maps $M_{i-1} \subseteq M_i$ with these digests, or a $H$-collision is extractable.\\
-(ii) Proofs of $M(k)=v$ and $M(k)=v'$ with $v \neq v'$ against the same digest yield an $H$-collision.
-\end{block}
-\end{frame}
-
-% ---------------------------------------------------------------------
-\begin{frame}{Setting: Trust model}
-\begin{columns}[T]
-\begin{column}{0.42\textwidth}
-\centering
-\begin{tikzpicture}
-  \node[box, fill=preserved, minimum width=5.0cm, minimum height=0.7cm] (cl) {Consensus Layer (BFT Core)};
-  \node[box, fill=white, minimum width=3.0cm, minimum height=0.7cm, below=1.3cm of cl] (ag) {Aggregator (RSMT)};
-  \node[box, fill=recomp, minimum width=5.0cm, minimum height=0.7cm, below=1.3cm of ag] (us) {Users};
-  \draw[arr] ([xshift=-4mm]ag.north) -- node[lbl, left] {$(r_{i-1}, r_i, \pi)$} ([xshift=-4mm]ag.north |- cl.south);
-  \draw[arr] ([xshift=4mm]ag.north |- cl.south) -- node[lbl, right] {certificate} ([xshift=4mm]ag.north);
-  \draw[arr] ([xshift=-4mm]us.north -| ag.south) -- node[lbl, left] {batch $B_i$} ([xshift=-4mm]ag.south);
-  \draw[arr] ([xshift=4mm]ag.south) -- node[lbl, right, align=left] {(non-)inclusion\\certificates} ([xshift=4mm]us.north -| ag.south);
-\end{tikzpicture}
-\end{column}
-\begin{column}{0.55\textwidth}
-\begin{block}{Consensus layer as an oracle}
-\footnotesize
-\begin{algorithmic}[0]
-  \Function{Certify}{$r_i, r_{i-1}, \pi$}
-    \If{$r_{i-1} \neq r_{\mathrm{last}} \lor \lnot\,\mathrm{valid}(\pi, r_{i-1}, r_i)$}
-      \State \Return $\bot$
-    \EndIf
-    \State $r_{\mathrm{last}} \gets r_i$;\ \ $i \gets i+1$
-    \State \Return $(i, r_i, r_{i-1};\ \sigma_{\mathrm{CL}})$
-  \EndFunction
-\end{algorithmic}
-\end{block}
-\small
-\begin{itemize}
-  \item The certifier is a BFT committee elected by delegated proof of stake. It keeps the latest roots only (not a log).
-  \item Each certified root is extended at most once, so the dictionary cannot fork.
-  \item The aggregator is untrusted. The proof $\pi$ must establish \alert{consistency}: pre-existing bindings are preserved, and each new leaf is placed at the position determined by its key.
-\end{itemize}
-\end{column}
-\end{columns}
 \end{frame}
 
 % =====================================================================
-\section{Data structure}
+\section{Construction}
 % =====================================================================
 
-\begin{frame}{Data Structures: sparse Merkle tree, radix tree}
+\begin{frame}{Data structure: radix sparse Merkle tree (RSMT)}
 \begin{columns}[T]
 \begin{column}{0.54\textwidth}
 \small
 \begin{itemize}
-  \item Sparse Merkle tree (SMT): every key is a leaf position in a binary tree of depth 256. Empty subtrees are implicit.
-  \item Radix sparse Merkle tree (RSMT): a path-compressed tree that contains only leaves and junctions (bifurcations).
+  \item The RSMT is a path-compressed sparse Merkle tree. It contains only leaves and junctions (bifurcations).
 \end{itemize}
 \vspace{-2mm}
 \begin{align*}
@@ -241,19 +204,18 @@ consistency & $M_{i-1} \subseteq M_i$ & $(r_{i-1}, r_i)$ & consensus layer \\
 \vspace{-6mm}
 \begin{itemize}
   \item $d$ is the bifurcation depth and $p \in \{0,1\}^d$ is the \emph{region}, the prefix shared by all keys below the junction.
-  \item Depth and region are absolute, so an insertion does not change the hash of any existing node. Every finite map has exactly one valid RSMT.
 \end{itemize}
 \end{column}
 \begin{column}{0.44\textwidth}
 \centering
 \begin{tikzpicture}[x=1cm,y=1cm]
   \node[jn, fill=preserved] (r) at (0,0) {$d{=}0,\ p{=}\varepsilon$};
-  \node[jn, fill=preserved] (l) at (-1.55,-1.3) {$d{=}1,\ p{=}\bits{0}$};
-  \node[jn, fill=preserved] (q) at (1.55,-1.3) {$d{=}3,\ p{=}\bits{110}$};
-  \node[lf, fill=white] (a) at (-2.35,-2.6) {\bits{0010}};
-  \node[lf, fill=white] (b) at (-0.75,-2.6) {\bits{0111}};
-  \node[lf, fill=white] (c) at (0.75,-2.6) {\bits{1100}};
-  \node[lf, fill=white] (e) at (2.35,-2.6) {\bits{1101}};
+  \node[jn, fill=preserved] (l) at (-1.55,-1.2) {$d{=}1,\ p{=}\bits{0}$};
+  \node[jn, fill=preserved] (q) at (1.55,-1.2) {$d{=}3,\ p{=}\bits{110}$};
+  \node[lf, fill=white] (a) at (-2.35,-2.4) {\bits{0010}};
+  \node[lf, fill=white] (b) at (-0.75,-2.4) {\bits{0111}};
+  \node[lf, fill=white] (c) at (0.75,-2.4) {\bits{1100}};
+  \node[lf, fill=white] (e) at (2.35,-2.4) {\bits{1101}};
   \draw[arr] (r) -- node[bitlbl, above left] {0} (l);
   \draw[arr] (r) -- node[bitlbl, above right] {1} (q);
   \draw[arr] (l) -- node[bitlbl, left] {0} (a);
@@ -262,32 +224,18 @@ consistency & $M_{i-1} \subseteq M_i$ & $(r_{i-1}, r_i)$ & consensus layer \\
   \draw[arr] (q) -- node[bitlbl, right] {1} (e);
 \end{tikzpicture}
 
-\vspace{2mm}
+\vspace{1mm}
 \raggedright\scriptsize 4-bit keys for illustration. An edge from junction $(d,p)$ on side $\beta$ is valid if the child is deeper than $d$ and its region extends $p \cat \beta$.
 \end{column}
 \end{columns}
-\end{frame}
 
-% ---------------------------------------------------------------------
-\begin{frame}{RSMT: justification}
-\begin{columns}[T]
-\begin{column}{0.54\textwidth}
+\vspace{1mm}
 \small
 \begin{itemize}
+  \item Depth and region are absolute, so an insertion does not change the hash of any existing node. Every finite map has exactly one valid RSMT, and there is no rebalancing.
   \item A certificate holds one sibling digest and one depth per junction on the key path, plus the terminal leaf. For $n$ uniformly distributed keys the expected path length is $\log_2 n + O(1)$, and no binary tree has a mean leaf depth below $\log_2 n$.
-  \item Regions are derived from the terminal key and do not make certificate larger.
-  \item Inclusion and non-inclusion share one format. If the descent for $k$ ends at a leaf with \emph{another} key, $k$ is absent.
-  \item The shape depends only on the key set. There is no rebalancing, and an insertion rehashes only the path to the new leaf.
-  \item A batch touches only its frontier, so the consistency proof is linear in the batch size and logarithmic in the tree size.
+  \item Inclusion and non-inclusion share one format. If the descent for $k$ ends at a leaf with another key, $k$ is absent.
 \end{itemize}
-\end{column}
-\begin{column}{0.44\textwidth}
-\centering
-\includegraphics[width=\linewidth]{tree_design_inclusion.pdf}
-
-\raggedright\scriptsize Median certificate size, batches of 10\,000 uniformly distributed keys. In the range variant, every sibling also carries the minimum and maximum key of its subtree.
-\end{column}
-\end{columns}
 \end{frame}
 
 % ---------------------------------------------------------------------
@@ -322,30 +270,11 @@ consistency & $M_{i-1} \subseteq M_i$ & $(r_{i-1}, r_i)$ & consensus layer \\
   \item Non-inclusion certificate for $k_c$ against $r_{i-1}$: $C = \big((0, h_a);\ (k_b, v_b)\big)$. The descent for $k_c = \bits{1101}$ ends at the leaf $k_b = \bits{1100} \neq k_c$.
   \item Update: $\hat d = |\lcp(k_c, k_b)| = 3$. The derived certificate $C^{+} = \big((3, h_b), (0, h_a);\ (k_c, v_c)\big)$ verifies against exactly one root, $r_i = \NodeHash\big(0, \varepsilon, h_a, \NodeHash(3, \bits{110}, h_b, h_c)\big)$.
   \item The verifier checks $C$ against $r_{i-1}$ and computes $r_i$ itself. The new root is not supplied by the operator, and $C^{+}$ is the inclusion certificate for $c$.
+  \item A batch of $j$ insertions costs $j$ certificates and $j$ sequential intermediate roots.
 \end{itemize}
 \end{frame}
 
 % ---------------------------------------------------------------------
-\begin{frame}{Single insertion: proof sketch (of the correctness of the consistency check)}
-\small
-For a single insertion, the non-inclusion proof doubles as a consistency proof: it determines the new root and transforms into an inclusion proof for the inserted leaf.
-
-\begin{enumerate}
-  \item \textbf{Matching.} If an opening tree (a partially opened commitment) evaluates to $\dig(T)$, each opened node equals the node of $T$ at the same position, or a collision of $H$ is computable.
-  \item \textbf{Certificate correctness.} The openings of a verifying certificate are the ancestors of its terminal leaf $(k',v')$. The descent is key-directed, so $k' \neq k$ implies $k \notin \dom(M)$.
-  \item \textbf{Update theorem.} If $C$ verifies for $k$ against $\dig(\Tree(M))$ and $k' \neq k$, then $\nxt(C;k,v) = \dig\big(\Tree(M \uplus \{k \mapsto v\})\big)$ \footnote{$\uplus$ denotes disjoint union}. The new junction is grafted at depth $|\lcp(k,k')|$.
-  \item \textbf{Run soundness.} By induction from $r_0 = \dig(\varnothing)$, every certified run satisfies $r_i = \dig(\Tree(M_i))$, and its keys are pairwise distinct.
-\end{enumerate}
-\begin{block}{No placement check is needed}
-\footnotesize
-The post-state is computed from the pre-state, and the regions are derived from the terminal key. The results above also hold for a junction hash that commits to the depth only. A batch of $j$ insertions costs $j$ certificates and $j$ sequential intermediate roots.
-\end{block}
-\end{frame}
-
-% =====================================================================
-\section{Batch consistency}
-% =====================================================================
-
 \begin{frame}{Batch insertion: the consistency proof}
 \begin{columns}[T]
 \begin{column}{0.38\textwidth}
@@ -372,14 +301,14 @@ The post-state is computed from the pre-state, and the regions are derived from 
 \begin{column}{0.60\textwidth}
 \small
 \begin{itemize}
-  \item The consistency proof $\pi$ is the post-order serialization of the part of the post-state tree that the batch touches, saved as a transcript (details at the next slide).
-  \item A verifier stack machine evaluates $\pi$ in one combined pass and computes both pre- and post-state roots. New junctions are skipped on the pre-state and hashed on the post-state computation.
-  \item The verifier processes $\pi$ so that it consumes batch elements $L$ in sorted order.
+  \item The consistency proof $\pi$ is the post-order serialization of the part of the post-state tree that the batch touches. Its size is linear in the batch size and logarithmic in the tree size.
+  \item A verifier stack machine evaluates $\pi$ in one pass, consumes the batch elements $L$ in sorted order, and computes both the pre-state and the post-state root.
+  \item At each junction $N(d)$ it checks \alert{edge coherence} (deeper children, regions extending $p \cat \beta$), \alert{confinement} (no opaque child under a new junction), and the digests.
 \end{itemize}
 \end{column}
 \end{columns}
 
-\vspace{2mm}
+\vspace{0.5mm}
 \footnotesize
 \begin{tabular}{@{}lllll@{}}
 \toprule
@@ -392,32 +321,6 @@ The post-state is computed from the pre-state, and the regions are derived from 
 5 & $N(0)$ & $\NodeHash(0,\varepsilon,h_a,h_b) = r_{i-1}$ & $\NodeHash(0,\varepsilon,h_a,h_N) = r_i$ & $(0,\varepsilon)$ \\
 \bottomrule
 \end{tabular}
-\end{frame}
-
-% ---------------------------------------------------------------------
-\begin{frame}{The transcript language}
-\footnotesize
-\begin{tabular}{@{}l l l@{}}
-\toprule
-Opcode & Meaning & Pushes (pre-state, post-state, advice) \\
-\midrule
-$S(c)$ & untouched subtree, opaque & $(c,\ c,\ \bot)$ \\
-$O(d',p',c_l,c_r)$ & untouched junction, opened & $(h,\ h,\ (d',p'))$ with $h = \NodeHash(d',p',c_l,c_r)$ \\
-$O_L(k',v')$ & untouched leaf, opened & $(h,\ h,\ (256,k'))$ with $h = \LeafHash(k',v')$ \\
-$L$ & new leaf, next batch element $(k,v)$ & $(\varnothing,\ \LeafHash(k,v),\ (256,k))$ \\
-$N(d)$ & junction over the two top entries & $(o,\ n,\ (d,p))$, checked as below \\
-\bottomrule
-\end{tabular}
-
-\vspace{2mm}
-\small
-At $N(d)$, with children $(o_l, n_l, a_l)$ and $(o_r, n_r, a_r)$:
-\begin{enumerate}
-  \item \textbf{Edge coherence.} Every advised child $a_x = (\delta, \varrho)$ satisfies $\delta > d$ and $\varrho[d] = \beta_x$, its side bit. The region $p = \varrho[0..d)$ is derived, and all advised children agree on it.
-  \item \textbf{Confinement.} If the junction is new ($o_l = \varnothing$ or $o_r = \varnothing$), both children must be advised. An opaque $S$ can only appear under a junction that already existed.
-  \item \textbf{Digest match.} $n = \NodeHash(d,p,n_l,n_r)$. The pre-state digest $o$ is $\varnothing$, the digest of the only existing child, or $\NodeHash(d,p,o_l,o_r)$ when both children existed.
-\end{enumerate}
-Accept iff the batch is consumed and the stack holds a single entry $(r_{i-1}, r_i, \cdot)$.
 \end{frame}
 
 % ---------------------------------------------------------------------
@@ -448,51 +351,44 @@ Accept iff the batch is consumed and the stack holds a single entry $(r_{i-1}, r
 \vspace{-1mm}
 \begin{block}{Fix: region commitment with local opening checks}
 \footnotesize
-The junction hash commits to the region $p$. Edge coherence is checked wherever an edge is created, and a preserved subtree must be opened where it meets a new junction. In the attack above, the opened old root has a region that is a prefix of $k$, so it cannot be placed on the $0$-side of $N(d^*)$. The region does not make (non)-inclusion certificates larger. As an alternative, committing the key range of every subtree is also sound, but it adds two keys to every certificate sibling.
+The junction hash commits to the region $p$. Edge coherence is checked wherever an edge is created, and confinement forces the old root to be opened, so its region, a prefix of $k$, cannot be placed on the $0$-side of $N(d^*)$. The region does not make (non-)inclusion certificates larger.
 \end{block}
 \end{frame}
 
-% ---------------------------------------------------------------------
-\begin{frame}{Batch soundness: proof sketch}
-\small
-\begin{enumerate}
-  \item \textbf{Proof terms.} The verifier accepts $\pi$ iff $\pi$ serializes a unique term $P$ whose attributes satisfy a local predicate at every junction.
-  \item \textbf{Old projection.} Removing the $L$ leaves and collapsing new junctions gives an opening tree that evaluates to $r_{i-1}$. Matching places every $S$, $O$, $O_L$ in the pre-state tree $T$.
-  \item \textbf{Reconstruction.} Grafting the matched subtrees into $P$ gives $T'$ with $\dig(T') = r_i$. Every edge of $T'$ is an edge of $T$ or passed the coherence check, and confinement excludes an opaque subtree under a new junction.
-  \item \textbf{Validity.} $T'$ is a valid tree, so its leaf keys are distinct. The batch keys are fresh, $\map(T') = \map(T) \uplus B$, and $T' = \Tree(M_i)$ by unique representation.
-\end{enumerate}
-\begin{block}{Theorem (history soundness)}
+% =====================================================================
+\section{Security}
+% =====================================================================
+
+\begin{frame}{Security results}
+\begin{block}{Theorem (single insertion)}
+\footnotesize
+If a certificate $C$ verifies for $k$ against $\dig(\Tree(M))$ and ends at a leaf with key $k' \neq k$, then $\nxt(C;k,v) = \dig\big(\Tree(M \uplus \{k \mapsto v\})\big)$.\footnote{$\uplus$ denotes disjoint union.} By induction from $r_0 = \dig(\varnothing)$, every certified run of single insertions satisfies $r_i = \dig(\Tree(M_i))$.
+\end{block}
+\begin{block}{Theorem (batch history soundness)}
 \footnotesize
 Every certified history satisfies $r_i = \dig(\Tree(M_i))$ with $M_i = M_{i-1} \uplus B_i$ for all $i$, or a collision of $H$ is computable from the transcripts.
 \end{block}
-\footnotesize
-Corollaries: one value per key across all roots; no false non-inclusion; no binding outside the batches. The transcript is computed in linear time.
+\small
+\begin{itemize}
+  \item Corollaries: one value per key across all roots, no false non-inclusion, no binding outside the batches. Certificates are binding: proofs of $M(k)=v$ and $M(k)=v'$ with $v \neq v'$ against one digest yield an $H$-collision.
+  \item Proof idea. \textbf{Matching:} an opening tree that evaluates to $\dig(T)$ agrees with $T$ at every opened position, or an $H$-collision is computable. \textbf{Old projection:} without the new leaves and junctions, $\pi$ is an opening tree of $r_{i-1}$, which places every $S$, $O$, $O_L$ in the pre-state tree. \textbf{Reconstruction:} grafting the matched subtrees gives a tree $T'$ with $\dig(T') = r_i$. Coherence and confinement make $T'$ valid, and unique representation gives $T' = \Tree(M_i)$.
+\end{itemize}
 \end{frame}
 
 % =====================================================================
 \section{Implementation}
 % =====================================================================
 
-\begin{frame}{Scaling: pure transcript}
-\centering
-\includegraphics[width=0.8\textwidth]{tree_design_consistency.pdf}
-
-\raggedright\small
-\begin{itemize}
-  \item Python reference with SHA-256, rounds of 10\,000 uniformly distributed insertions. The depth-only RSMT does not enforce placement and is shown as a lower bound.
-  \item Verifier work per insertion grows logarithmically with the tree size.
-  \item Transcript and batch take about 320 bytes per insertion at $10^6$ leaves, or 3.2\,MB per round. The consensus layer receives data linear in the transaction rate, which limits this mode to about $10^4$ insertions/s (bandwidth limit).
-\end{itemize}
-\end{frame}
-
-% ---------------------------------------------------------------------
-\begin{frame}{Scaling: STARK-compressed transcript}
+\begin{frame}{Performance}
 \small
-The transcript verifier is a custom AIR on Plonky3 (BabyBear field, FRI, no trusted setup). The public input is $(r_{i-1}, r_i)$, and the batch and $\pi$ are witness data.
+\begin{itemize}
+  \item \textbf{Hash-based transcript} (Python reference, SHA-256). Transcript and batch take about 320 bytes per insertion at $10^6$ leaves. The consensus layer receives data linear in the transaction rate, which limits this mode to about $10^4$ insertions/s.
+  \item \textbf{STARK-compressed transcript.} A custom AIR on Plonky3 (BabyBear field, FRI, no trusted setup) proves the transcript verifier. The public input is $(r_{i-1}, r_i)$, and the batch and $\pi$ are witness data.
+\end{itemize}
 
 \vspace{1mm}
 \begin{columns}[T]
-\begin{column}{0.52\textwidth}
+\begin{column}{0.48\textwidth}
 \centering\footnotesize
 \begin{tabular}{@{}rrrrr@{}}
 \toprule
@@ -503,27 +399,26 @@ batch & prove & verify & proof & insertions/s \\
 8192 & 228\,ms & 47\,ms & 1.82\,MB & 35\,900 \\
 \bottomrule
 \end{tabular}\\[1mm]
-\scriptsize Apple M1 Pro, Poseidon2 as FRI hash.
+\scriptsize Custom AIR, Poseidon2 tree hash, Apple M1 Pro.
 \end{column}
-\begin{column}{0.44\textwidth}
+\begin{column}{0.48\textwidth}
 \centering\footnotesize
-\begin{tabular}{@{}lrrr@{}}
+\begin{tabular}{@{}llrr@{}}
 \toprule
-tree hash & cells/call & cells & insertions/s \\
+prover & tree hash & cells & insertions/s \\
 \midrule
-Poseidon2 & 300 & $1\times$ & 28\,600 \\
-SHA-256 & ${\approx}\,8\,000$ & ${\approx}\,19\times$ & ${\approx}\,1\,500$ \\
+custom AIR & Poseidon2 & $1\times$ & 28\,600 \\
+custom AIR & SHA-256 & ${\approx}\,19\times$ & ${\approx}\,1\,500$ \\
+zkVM (SP1) & SHA-256 & & ${\approx}\,1.5$ \\
 \bottomrule
 \end{tabular}\\[1mm]
-\scriptsize Batch 4096. SHA-256 is analytical result.
+\scriptsize Custom AIR at batch 4096. The SHA-256 AIR row is an analytical estimate.
 \end{column}
 \end{columns}
 
-\vspace{1mm}
+\vspace{2mm}
 \begin{itemize}
-  \item Verification time does not depend on the batch size. Trace cells are dominated by Poseidon2 permutations (76\,\%).
-  %\item SHA-256 estimate, with prove time proportional to trace cells: $0.24 \cdot 1.5 + 0.76 \cdot 0.9 \cdot 8\,000/300 \approx 19$. The other tables widen by 1.5 because digests need 16 limbs instead of 8. A 65-byte leaf or 98-byte node input takes two compressions, against two or three permutations (factor 0.9). A compression commits the bits of $a$, $e$, and $W_t$ in each of 64 rounds, about 8\,000 cells against 300 per permutation.
-  \item A general-purpose zkVM (SP1) with a SHA-256 tree hash reached about 1.5 insertions/s.
+  \item Verification time does not depend on the batch size. Poseidon2 permutations make up 76\,\% of the trace cells.
 \end{itemize}
 \end{frame}
 
@@ -541,93 +436,52 @@ SHA-256 & ${\approx}\,8\,000$ & ${\approx}\,19\times$ & ${\approx}\,1\,500$ \\
   }
   \node[lbl, fill=uBg, align=center] at (0,0.97) {$(r_{i-1,\sigma}, r_{i,\sigma}, \pi_{i,\sigma})\uparrow$\quad certificate$\downarrow$};
 \end{tikzpicture}
+
+\vspace{6mm}
+\raggedright
+\begin{tabular}{@{}r@{\hspace{3mm}}>{\raggedright\arraybackslash}p{3.0cm}@{}}
+{\large\bfseries\color{uOrange} $>$10\,000} & \footnotesize insertions/s per shard, proved locally \\[2mm]
+{\large\bfseries\color{uOrange} $<$50\,ms} & \footnotesize to verify a round, independent of the batch size \\[2mm]
+{\large\bfseries\color{uOrange} 1 proof} & \footnotesize of constant size for the full history \\
+\end{tabular}
 \end{column}
-\begin{column}{0.6\textwidth}
+\begin{column}{0.58\textwidth}
 \small
 \begin{itemize}
-  \item \textbf{Sharding.} The key prefix $\sigma$ selects the shard. A certificate is the shard's hash path plus $|\sigma|$ digests of the small shard-root tree.
-  \item A shard splits further into $\sigma\cat\bits{0}$ and $\sigma\cat\bits{1}$ trivially: each child root is an existing subtree (or $\bot$).
-  \item \textbf{Succinct proofs.} Consensus Layer verifies one proof per changed shard. Its load grows with the number of shards, not with the transaction rate.
-  \item \textbf{Scaling beyond RAM.} The Rust aggregator keeps the RSMT in on-disk k-v store and loads nodes on demand. The next round runs speculatively while the current root awaits certification.
-  \item \textbf{Consistency of full history.} SP1 (zkVM) folds all shard proofs and root transitions into one constant-size STARK proof. Validating it replaces trust in the economical security of the Consensus Layer.
+  \item \textbf{Sharding.} The key prefix $\sigma$ selects the shard. A certificate is the shard's hash path plus $|\sigma|$ digests of the shard-root tree. A shard splits trivially into $\sigma\cat\bits{0}$ and $\sigma\cat\bits{1}$, since each child root is an existing subtree (or $\bot$).
+  \item \textbf{Succinct proofs.} The consensus layer verifies one proof per changed shard. Its load grows with the number of shards, not with the transaction rate.
+  \item \textbf{Scaling beyond RAM.} The Rust aggregator keeps the RSMT in an on-disk key-value store and loads nodes on demand. The next round runs speculatively while the current root awaits certification.
+  \item \textbf{Consistency of full history.} SP1 (zkVM) folds all shard proofs and root transitions into one constant-size STARK proof. Validating it replaces trust in the economic security of the consensus layer.
 \end{itemize}
 \end{column}
 \end{columns}
 \end{frame}
 
 % =====================================================================
-\section{Discussion}
+\section{Summary}
 % =====================================================================
 
-\begin{frame}{The Unicity Network: resulting properties}
-\begin{columns}[T]
-\begin{column}{0.48\textwidth}
-\begin{block}{The infrastructure}
-\small
-\begin{itemize}
-  \item records two 32-byte digests per spent token state,
-  \item certifies one root per shard and round,
-  \item serves inclusion and non-inclusion proofs,
-  \item proves its own state transitions.
-\end{itemize}
-\end{block}
-\end{column}
-\begin{column}{0.48\textwidth}
-\begin{block}{The infrastructure does not}
-\small
-\begin{itemize}
-  \item order or execute transactions,
-  \item store token data or transaction payloads,
-  \item publish anything except unlinkable state and transaction identifiers.
-\end{itemize}
-\end{block}
-\end{column}
-\end{columns}
-
-\vspace{4mm}
-\begin{columns}[T]
-\begin{column}{0.31\textwidth}\centering
-{\Large\bfseries\color{uOrange} $>$10\,000}\\[1pt]\footnotesize insertions per shard, proved locally
-\end{column}
-\begin{column}{0.31\textwidth}\centering
-{\Large\bfseries\color{uOrange} $<$50\,ms}\\[1pt]\footnotesize to verify consistency of a round, independent of the batch size
-\end{column}
-\begin{column}{0.31\textwidth}\centering
-{\Large\bfseries\color{uOrange} 1 proof}\\[1pt]\footnotesize of constant size for the full history since genesis
-\end{column}
-\end{columns}
-
-\vspace{4mm}
-\small To our knowledge, this is the first blockchain design in which the complete server-side state transition history is proven succinctly on commodity hardware.
-\end{frame}
-
-
-% ---------------------------------------------------------------------
 \begin{frame}{Summary}
+\small
 \begin{itemize}
   \item A uniqueness service is the minimal online component of a trustless transaction system. Computational integrity proofs do not replace it.
   \item We implement it as an add-only dictionary on a region-committing radix Merkle tree, with compact inclusion and non-inclusion certificates.
-  \item Single insertion consistency is proven by non-inclusion certificates. The batch insertion proof in the transcript forn adds checked coherent placement. In both cases, append-only consistency of the whole certified history reduces to collision resistance of the hash function.
+  \item Single insertion consistency is proven by non-inclusion certificates. The batch insertion proof in the transcript form adds checked coherent placement. In both cases, append-only consistency of the whole certified history reduces to collision resistance of the hash function.
   \item A custom AIR proves more than 10\,000 insertions/s per shard on one CPU. Recursive aggregation gives one constant-size proof of the full history.
 \end{itemize}
-\end{frame}
 
-% ---------------------------------------------------------------------
-\begin{frame}{More information}
-\begin{itemize}
-  \item Technical report (full proofs, AIR design, aggregation):\\
-        \url{https://arxiv.org/pdf/2608.05316}
-  \item Aggregator implementation (Rust, disk-backed RSMT, consistency proofs):\\
-        \url{https://github.com/ristik/rugregator}
-  \item AIR implementation (Plonky3):\\
-        \url{https://github.com/ristik/rsmt-air}
-    \item Scaling experiments (Python):\\
-        \url{https://github.com/ristik/ndsmt-experiments}
-  \item Unicity Network:\\
-        \url{https://unicity.network}\quad \url{https://github.com/unicitynetwork}
-\end{itemize}
-\vspace{6mm}
-\centering\large Questions
+\vspace{2mm}
+\footnotesize
+\begin{tabular}{@{}ll@{}}
+\toprule
+Technical report (full proofs, AIR design, aggregation) & \url{https://arxiv.org/pdf/2608.05316} \\
+Aggregator (Rust, disk-backed RSMT, consistency proofs) & \url{https://github.com/ristik/rugregator} \\
+AIR implementation (Plonky3) & \url{https://github.com/ristik/rsmt-air} \\
+Scaling experiments (Python) & \url{https://github.com/ristik/ndsmt-experiments} \\
+Unicity Network & \url{https://unicity.network} \\
+ & \url{https://github.com/unicitynetwork} \\
+\bottomrule
+\end{tabular}
 \end{frame}
 
 % =====================================================================
@@ -637,6 +491,71 @@ SHA-256 & ${\approx}\,8\,000$ & ${\approx}\,19\times$ & ${\approx}\,1\,500$ \\
 
 \begin{frame}
 \insertsectionhead
+\end{frame}
+
+% ---------------------------------------------------------------------
+\begin{frame}{The Unicity Network}
+\begin{columns}[T]
+\begin{column}{0.56\textwidth}
+\begin{itemize}
+  \item Tokens are self-contained data objects kept by their owners. Transactions are executed and validated off-chain by the parties involved.
+  \item There is no global ordering of transactions and no global execution.
+  \item The only globally shared state is the set of spent token states, each recorded under the identifier $k = H(\text{token state})$.
+  \item A transaction is accepted only together with a \alert{proof of unicity}: an inclusion proof of the spent state against a root certified by the consensus layer.
+\end{itemize}
+\end{column}
+\begin{column}{0.40\textwidth}
+\centering
+\begin{tikzpicture}[layer/.style={box, minimum width=5.2cm, minimum height=1.05cm, font=\small}]
+  \node[layer, fill=preserved] (cl) {\textbf{Consensus Layer}\\[-1pt]\scriptsize State Machine Replication--based certifier};
+  \node[layer, fill=preserved, below=6mm of cl] (al) {\textbf{Aggregation Layer}\\[-1pt]\scriptsize Radix Sparse Merkle Tree: records spent states};
+  \node[layer, fill=recomp, below=13mm of al] (el) {\textbf{Execution Layer}\\[-1pt]\scriptsize p2p transaction};
+  \draw[darr] (cl) -- (al);
+  \draw[darr] (al) -- (el);
+  \draw[dashed, uGrey] ($(al.south west)!0.5!(el.north west)$) -- ($(al.south east)!0.5!(el.north east)$);
+  \node[lbl, anchor=south east, text=uGrey] at ($(al.south east)!0.5!(el.north east)$) {infrastructure};
+  \node[lbl, anchor=north east, text=uGrey] at ($(al.south east)!0.5!(el.north east)$) {off-chain};
+\end{tikzpicture}
+\end{column}
+\end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------
+\begin{frame}{Trust model}
+\begin{columns}[T]
+\begin{column}{0.42\textwidth}
+\centering
+\begin{tikzpicture}
+  \node[box, fill=preserved, minimum width=5.0cm, minimum height=0.7cm] (cl) {Consensus Layer (BFT Core)};
+  \node[box, fill=white, minimum width=3.0cm, minimum height=0.7cm, below=1.3cm of cl] (ag) {Aggregator (RSMT)};
+  \node[box, fill=recomp, minimum width=5.0cm, minimum height=0.7cm, below=1.3cm of ag] (us) {Users};
+  \draw[arr] ([xshift=-4mm]ag.north) -- node[lbl, left] {$(r_{i-1}, r_i, \pi)$} ([xshift=-4mm]ag.north |- cl.south);
+  \draw[arr] ([xshift=4mm]ag.north |- cl.south) -- node[lbl, right] {certificate} ([xshift=4mm]ag.north);
+  \draw[arr] ([xshift=-4mm]us.north -| ag.south) -- node[lbl, left] {batch $B_i$} ([xshift=-4mm]ag.south);
+  \draw[arr] ([xshift=4mm]ag.south) -- node[lbl, right, align=left] {(non-)inclusion\\certificates} ([xshift=4mm]us.north -| ag.south);
+\end{tikzpicture}
+\end{column}
+\begin{column}{0.55\textwidth}
+\begin{block}{Consensus layer as an oracle}
+\footnotesize
+\begin{algorithmic}[0]
+  \Function{Certify}{$r_i, r_{i-1}, \pi$}
+    \If{$r_{i-1} \neq r_{\mathrm{last}} \lor \lnot\,\mathrm{valid}(\pi, r_{i-1}, r_i)$}
+      \State \Return $\bot$
+    \EndIf
+    \State $r_{\mathrm{last}} \gets r_i$;\ \ $i \gets i+1$
+    \State \Return $(i, r_i, r_{i-1};\ \sigma_{\mathrm{CL}})$
+  \EndFunction
+\end{algorithmic}
+\end{block}
+\small
+\begin{itemize}
+  \item The certifier is a BFT committee elected by delegated proof of stake. It keeps the latest roots only (not a log).
+  \item Each certified root is extended at most once, so the dictionary cannot fork.
+  \item The aggregator is untrusted. The proof $\pi$ must establish \alert{consistency}: pre-existing bindings are preserved, and each new leaf is placed at the position determined by its key.
+\end{itemize}
+\end{column}
+\end{columns}
 \end{frame}
 
 % ---------------------------------------------------------------------
@@ -688,7 +607,37 @@ Validity rollups (zkEVM) & VM state trie & correct execution of all transactions
 \end{itemize}
 \end{frame}
 
+% ---------------------------------------------------------------------
+\begin{frame}{Computational integrity does not provide uniqueness}
+\begin{columns}[c]
+\begin{column}{0.56\textwidth}
+\small
+\begin{itemize}
+  \item A succinct proof $\pi$ attests that the state $s$ results from a valid computation, for example from genesis.
+  \item The pair $(s,\pi)$ is data. It can be copied together with its execution environment, and both copies can be continued. The transitions $s \to s'$ and $s \to s''$ are then both provably valid, which is a double-spend or a fork.
+  \item The missing primitive is a certificate that $s$ was consumed at most once, that is, a single assignment to the key $H(s)$.
+  \item Combined, $\pi$ proves that a transition is valid, and an inclusion proof of $H(s) \mapsto H(t)$ against a certified root proves that it is the only one.
+\end{itemize}
+\end{column}
+\begin{column}{0.42\textwidth}
+\centering
+\begin{tikzpicture}[st/.style={box, minimum width=1.0cm, minimum height=0.6cm, font=\small}]
+  \node[st, fill=preserved] (s) at (0,0) {$s$};
+  \node[st, fill=fresh] (s1) at (2.9,0.9) {$s'$};
+  \node[st, fill=attack] (s2) at (2.9,-0.9) {$s''$};
+  \draw[arr] (s) -- node[lbl, above, sloped] {$t_1$} (s1);
+  \draw[arr] (s) -- node[lbl, below, sloped] {$t_2$} (s2);
+  \node[lbl, right=1mm of s1, align=left] {valid $\pi'$};
+  \node[lbl, right=1mm of s2, align=left] {valid $\pi''$};
+  \node[box, fill=fresh, anchor=north, minimum width=4.3cm] (r1) at (1.6,-1.9) {$H(s) \mapsto H(t_1)$: recorded};
+  \node[box, fill=attack, below=1.5mm of r1, minimum width=4.3cm] (r2) {$H(s) \mapsto H(t_2)$: rejected, key is set};
+  \node[lbl, above=0.5mm of r1, text=uGrey] {uniqueness service};
+\end{tikzpicture}
+\end{column}
+\end{columns}
+\end{frame}
 
+% ---------------------------------------------------------------------
 \begin{frame}{What uniqueness and computational integrity enable}
 \footnotesize
 A single-assignment register per key is a universal primitive. A shared object can be implemented as a chain of registers keyed by (object identifier, sequence number), cf.\ sticky bits (Plotkin 1989). Any state machine with provable transitions can therefore be advanced with a uniqueness guarantee, and expressiveness is not the limit.
@@ -703,6 +652,144 @@ A single-assignment register per key is a universal primitive. A shared object c
   \item \textbf{Certifier equivocation.} No proof system can exclude a quorum that signs two continuations. It can be detected and attributed.
 \end{enumerate}
 \end{block}
+\end{frame}
+
+% ---------------------------------------------------------------------
+\begin{frame}{The Unicity Network: resulting properties}
+\begin{columns}[T]
+\begin{column}{0.48\textwidth}
+\begin{block}{The infrastructure}
+\small
+\begin{itemize}
+  \item records two 32-byte digests per spent token state,
+  \item certifies one root per shard and round,
+  \item serves inclusion and non-inclusion proofs,
+  \item proves its own state transitions.
+\end{itemize}
+\end{block}
+\end{column}
+\begin{column}{0.48\textwidth}
+\begin{block}{The infrastructure does not}
+\small
+\begin{itemize}
+  \item order or execute transactions,
+  \item store token data or transaction payloads,
+  \item publish anything except unlinkable state and transaction identifiers.
+\end{itemize}
+\end{block}
+\end{column}
+\end{columns}
+
+\vspace{4mm}
+\begin{columns}[T]
+\begin{column}{0.31\textwidth}\centering
+{\Large\bfseries\color{uOrange} $>$10\,000}\\[1pt]\footnotesize insertions per shard, proved locally
+\end{column}
+\begin{column}{0.31\textwidth}\centering
+{\Large\bfseries\color{uOrange} $<$50\,ms}\\[1pt]\footnotesize to verify consistency of a round, independent of the batch size
+\end{column}
+\begin{column}{0.31\textwidth}\centering
+{\Large\bfseries\color{uOrange} 1 proof}\\[1pt]\footnotesize of constant size for the full history since genesis
+\end{column}
+\end{columns}
+
+\vspace{4mm}
+\small To our knowledge, this is the first blockchain design in which the complete server-side state transition history is proven succinctly on commodity hardware.
+\end{frame}
+
+% ---------------------------------------------------------------------
+\begin{frame}{RSMT: justification}
+\begin{columns}[T]
+\begin{column}{0.54\textwidth}
+\small
+\begin{itemize}
+  \item A certificate holds one sibling digest and one depth per junction on the key path, plus the terminal leaf. For $n$ uniformly distributed keys the expected path length is $\log_2 n + O(1)$, and no binary tree has a mean leaf depth below $\log_2 n$.
+  \item Regions are derived from the terminal key and do not make certificates larger.
+  \item Inclusion and non-inclusion share one format. If the descent for $k$ ends at a leaf with \emph{another} key, $k$ is absent.
+  \item The shape depends only on the key set. There is no rebalancing, and an insertion rehashes only the path to the new leaf.
+  \item A batch touches only its frontier, so the consistency proof is linear in the batch size and logarithmic in the tree size.
+\end{itemize}
+\end{column}
+\begin{column}{0.44\textwidth}
+\centering
+\includegraphics[width=\linewidth]{tree_design_inclusion.pdf}
+
+\raggedright\scriptsize Median certificate size, batches of 10\,000 uniformly distributed keys. In the range variant, every sibling also carries the minimum and maximum key of its subtree.
+\end{column}
+\end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------
+\begin{frame}{Single insertion: proof sketch (of the correctness of the consistency check)}
+\small
+For a single insertion, the non-inclusion proof doubles as a consistency proof: it determines the new root and transforms into an inclusion proof for the inserted leaf.
+
+\begin{enumerate}
+  \item \textbf{Matching.} If an opening tree (a partially opened commitment) evaluates to $\dig(T)$, each opened node equals the node of $T$ at the same position, or a collision of $H$ is computable.
+  \item \textbf{Certificate correctness.} The openings of a verifying certificate are the ancestors of its terminal leaf $(k',v')$. The descent is key-directed, so $k' \neq k$ implies $k \notin \dom(M)$.
+  \item \textbf{Update theorem.} If $C$ verifies for $k$ against $\dig(\Tree(M))$ and $k' \neq k$, then $\nxt(C;k,v) = \dig\big(\Tree(M \uplus \{k \mapsto v\})\big)$ \footnote{$\uplus$ denotes disjoint union}. The new junction is grafted at depth $|\lcp(k,k')|$.
+  \item \textbf{Run soundness.} By induction from $r_0 = \dig(\varnothing)$, every certified run satisfies $r_i = \dig(\Tree(M_i))$, and its keys are pairwise distinct.
+\end{enumerate}
+\begin{block}{No placement check is needed}
+\footnotesize
+The post-state is computed from the pre-state, and the regions are derived from the terminal key. The results above also hold for a junction hash that commits to the depth only. A batch of $j$ insertions costs $j$ certificates and $j$ sequential intermediate roots.
+\end{block}
+\end{frame}
+
+% ---------------------------------------------------------------------
+\begin{frame}{The transcript language}
+\footnotesize
+\begin{tabular}{@{}l l l@{}}
+\toprule
+Opcode & Meaning & Pushes (pre-state, post-state, advice) \\
+\midrule
+$S(c)$ & untouched subtree, opaque & $(c,\ c,\ \bot)$ \\
+$O(d',p',c_l,c_r)$ & untouched junction, opened & $(h,\ h,\ (d',p'))$ with $h = \NodeHash(d',p',c_l,c_r)$ \\
+$O_L(k',v')$ & untouched leaf, opened & $(h,\ h,\ (256,k'))$ with $h = \LeafHash(k',v')$ \\
+$L$ & new leaf, next batch element $(k,v)$ & $(\varnothing,\ \LeafHash(k,v),\ (256,k))$ \\
+$N(d)$ & junction over the two top entries & $(o,\ n,\ (d,p))$, checked as below \\
+\bottomrule
+\end{tabular}
+
+\vspace{2mm}
+\small
+At $N(d)$, with children $(o_l, n_l, a_l)$ and $(o_r, n_r, a_r)$:
+\begin{enumerate}
+  \item \textbf{Edge coherence.} Every advised child $a_x = (\delta, \varrho)$ satisfies $\delta > d$ and $\varrho[d] = \beta_x$, its side bit. The region $p = \varrho[0..d)$ is derived, and all advised children agree on it.
+  \item \textbf{Confinement.} If the junction is new ($o_l = \varnothing$ or $o_r = \varnothing$), both children must be advised. An opaque $S$ can only appear under a junction that already existed.
+  \item \textbf{Digest match.} $n = \NodeHash(d,p,n_l,n_r)$. The pre-state digest $o$ is $\varnothing$, the digest of the only existing child, or $\NodeHash(d,p,o_l,o_r)$ when both children existed.
+\end{enumerate}
+Accept iff the batch is consumed and the stack holds a single entry $(r_{i-1}, r_i, \cdot)$.
+\end{frame}
+
+% ---------------------------------------------------------------------
+\begin{frame}{Batch soundness: proof sketch}
+\small
+\begin{enumerate}
+  \item \textbf{Proof terms.} The verifier accepts $\pi$ iff $\pi$ serializes a unique term $P$ whose attributes satisfy a local predicate at every junction.
+  \item \textbf{Old projection.} Removing the $L$ leaves and collapsing new junctions gives an opening tree that evaluates to $r_{i-1}$. Matching places every $S$, $O$, $O_L$ in the pre-state tree $T$.
+  \item \textbf{Reconstruction.} Grafting the matched subtrees into $P$ gives $T'$ with $\dig(T') = r_i$. Every edge of $T'$ is an edge of $T$ or passed the coherence check, and confinement excludes an opaque subtree under a new junction.
+  \item \textbf{Validity.} $T'$ is a valid tree, so its leaf keys are distinct. The batch keys are fresh, $\map(T') = \map(T) \uplus B$, and $T' = \Tree(M_i)$ by unique representation.
+\end{enumerate}
+\begin{block}{Theorem (history soundness)}
+\footnotesize
+Every certified history satisfies $r_i = \dig(\Tree(M_i))$ with $M_i = M_{i-1} \uplus B_i$ for all $i$, or a collision of $H$ is computable from the transcripts.
+\end{block}
+\footnotesize
+Corollaries: one value per key across all roots; no false non-inclusion; no binding outside the batches. The transcript is computed in linear time.
+\end{frame}
+
+% ---------------------------------------------------------------------
+\begin{frame}{Hash-based transcript}
+\centering
+\includegraphics[width=0.8\textwidth]{tree_design_consistency.pdf}
+
+\raggedright\small
+\begin{itemize}
+  \item Python reference with SHA-256, rounds of 10\,000 uniformly distributed insertions. The depth-only RSMT does not enforce placement and is shown as a lower bound.
+  \item Verifier work per insertion grows logarithmically with the tree size.
+  \item Transcript and batch take about 320 bytes per insertion at $10^6$ leaves, or 3.2\,MB per round. The consensus layer receives data linear in the transaction rate, which limits this mode to about $10^4$ insertions/s (bandwidth limit).
+\end{itemize}
 \end{frame}
 
 % ---------------------------------------------------------------------
@@ -782,37 +869,6 @@ Blake3 & 130\,ms & 12\,ms & 1.69\,MB \\
 \end{columns}
 \end{frame}
 
-
-% ---------------------------------------------------------------------
-% \begin{frame}<presentation:0>
-\begin{frame}{Computational integrity does not provide uniqueness}
-\begin{columns}[c]
-\begin{column}{0.56\textwidth}
-\small
-\begin{itemize}
-  \item A succinct proof $\pi$ attests that the state $s$ results from a valid computation, for example from genesis.
-  \item The pair $(s,\pi)$ is data. It can be copied together with its execution environment, and both copies can be continued. The transitions $s \to s'$ and $s \to s''$ are then both provably valid, which is a double-spend or a fork.
-  \item The missing primitive is a certificate that $s$ was consumed at most once, that is, a single assignment to the key $H(s)$.
-  \item Combined, $\pi$ proves that a transition is valid, and an inclusion proof of $H(s) \mapsto H(t)$ against a certified root proves that it is the only one.
-\end{itemize}
-\end{column}
-\begin{column}{0.42\textwidth}
-\centering
-\begin{tikzpicture}[st/.style={box, minimum width=1.0cm, minimum height=0.6cm, font=\small}]
-  \node[st, fill=preserved] (s) at (0,0) {$s$};
-  \node[st, fill=fresh] (s1) at (2.9,0.9) {$s'$};
-  \node[st, fill=attack] (s2) at (2.9,-0.9) {$s''$};
-  \draw[arr] (s) -- node[lbl, above, sloped] {$t_1$} (s1);
-  \draw[arr] (s) -- node[lbl, below, sloped] {$t_2$} (s2);
-  \node[lbl, right=1mm of s1, align=left] {valid $\pi'$};
-  \node[lbl, right=1mm of s2, align=left] {valid $\pi''$};
-  \node[box, fill=fresh, anchor=north, minimum width=4.3cm] (r1) at (1.6,-1.9) {$H(s) \mapsto H(t_1)$: recorded};
-  \node[box, fill=attack, below=1.5mm of r1, minimum width=4.3cm] (r2) {$H(s) \mapsto H(t_2)$: rejected, key is set};
-  \node[lbl, above=0.5mm of r1, text=uGrey] {uniqueness service};
-\end{tikzpicture}
-\end{column}
-\end{columns}
-\end{frame}
 % ---------------------------------------------------------------------
 \begin{frame}{Full-history aggregation}
 \small

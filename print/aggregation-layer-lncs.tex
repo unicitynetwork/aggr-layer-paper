@@ -1,4 +1,4 @@
-% NGISE 2026 proceedings version (Springer LNCS template, limit 12 pages).
+% NGISE 2026 proceedings version (Springer LNCS template, target 15 pages).
 % Full version with all proofs: arXiv:2608.05316.
 % Build: make  (pdflatex + bibtex via latexmk)
 \documentclass[runningheads]{llncs}
@@ -39,6 +39,11 @@
 \newcommand{\OLeaf}{\mathsf{OLeaf}}
 \newcommand{\ONode}{\mathsf{ONode}}
 \newcommand{\Certify}{\mathsf{Certify}}
+\newcommand{\Old}{\mathsf{old}}
+\newcommand{\New}{\mathsf{new}}
+\newcommand{\Adv}{\mathsf{adv}}
+\newcommand{\Ok}{\mathsf{ok}}
+\newcommand{\Graft}{\mathsf{graft}}
 \newcommand{\dom}{\mathrm{dom}}
 \newcommand{\cat}{\mathbin{\|}}
 \newcommand{\K}{\mathcal{K}}
@@ -85,7 +90,7 @@ Ahto Buldas\inst{2}\orcidID{0000-0002-6413-8258}}
 \begin{abstract}
 In the Unicity Network, tokens are transferred off-chain: the transacting parties execute and validate every transaction themselves, without the overhead of distributed ledger. The fact that a token state---together with any cryptographic proof---can be copied, requires still some global synchronization to avoid double spends. We implement this online supporting functionality as a globally shared  authenticated dictionary of spent states, specifically, as an add-only radix sparse Merkle tree. To implement this service trustlessly (supporting adversarial operator), the service produces cryptographic proofs for other parties: inclusion and non-inclusion proofs for users, and consistency proofs to a party who certifies the dictionary authenticators. Consistency proof shows, that the tree was updated canonically and no existing recorded states were modified or removed.
 For a single insertion no specific consistency proof is needed: the non-inclusion certificate that shows a key to be unset already determines the root after the key is inserted. We prove that a run of single insertions is append-only consistent under collision resistance of the hash function.
-We follow with batched updates, and some engineering insights about removing the scaling limits.
+For batches, the natural proof, that every hash of the old tree is preserved in the new one, is not sound. Committing every junction to its key prefix reduces correct placement to a local check on each new edge, and we prove that every certified sequence of batch updates is then append-only as well.
 
 \keywords{Authenticated data structures \and Sparse Merkle trees \and Consistency proofs \and Double-spending \and Blockchain}
 \end{abstract}
@@ -103,9 +108,10 @@ In Unicity the record is maintained by the Aggregation Layer. A key $k = H(\text
   \item \emph{Security definition.} We formulate the record as an add-only authenticated dictionary with inclusion, non-inclusion, and consistency proofs, and its security as a reduction to collision resistance (Sect.~\ref{sec:model}).
   \item \emph{Data structure.} In the region-committing radix sparse Merkle tree (RSMT), every finite map has exactly one valid tree, and inclusion and non-inclusion share one certificate format with one sibling digest per junction on the key path (Sect.~\ref{sec:rsmt}).
   \item \emph{Single insertion.} We prove that a non-inclusion certificate determines the root after the insertion and transforms into the inclusion certificate of the new binding, so that certified runs of single insertions are append-only consistent (Sect.~\ref{sec:single}).
-  \item \emph{Batch insertion.} We give a five-opcode transcript language with a one-pass verifier, and an attack which shows that preserving all digests of the previous tree is not sufficient. The verifier must also check the placement of keys, which the region commitment makes a local check. We state the soundness and completeness theorems (Sect.~\ref{sec:batch}).
+  \item \emph{Batch insertion.} We give a five-opcode transcript language with a one-pass verifier, and an attack which shows that preserving all digests of the previous tree is not sufficient. The verifier must also check the placement of keys, which the region commitment makes a local check. We prove that the checks are sound for the entire certified history, and state completeness (Sect.~\ref{sec:batch}).
+  \item \emph{Evaluation.} We measure the consistency proofs and a STARK of the batch verifier, and outline how a recursive proof over all rounds removes the certifier from the correctness argument (Sect.~\ref{sec:impl}).
 \end{itemize}
-The extended version of this paper~\cite{fullversion} contains all proofs, the algorithms, the arithmetization of the batch verifier as a STARK, and the recursive aggregation of the full certified history into a single proof.
+The extended version of this paper~\cite{fullversion} adds the proof of completeness, the algorithms, the arithmetization of the batch verifier, and the details of the recursive aggregation.
 
 \begin{figure}[t]
 \centering
@@ -175,7 +181,7 @@ Let $\mathsf{Dig}(M)$ denote the digest of a map $M$ (Sect.~\ref{sec:rsmt}). The
 
 Property (i) is stated for sequences that start from the empty dictionary. These are the sequences that $\Certify$ accepts, and a single proof against an arbitrary root does not determine a map. Together with the completeness of the proofs, (i) and (ii) exclude a double-spend across rounds: a proof of $M(k) = v \neq \bot$ against $r_i$ and a proof of $M(k) = v'$ with $v' \neq v$ against a later $r_j$ yield a collision (Corollary~\ref{cor:history}).
 
-An adversarial aggregator can therefore affect only liveness. It can delay or censor requests, which replicated aggregators and resubmission mitigate, and the omission of an accepted request is detected when the recipient asks for an inclusion certificate against the certified root. It cannot change or remove a recorded binding. The quorum of the certifier is trusted for liveness and for the uniqueness of the latest root. A quorum that signs two continuations of one root leaves attributable evidence, and no proof system can exclude this. The extended version~\cite{fullversion} removes the quorum from the correctness argument for the recorded history by aggregating all consistency proofs into one recursive STARK.
+An adversarial aggregator can therefore affect only liveness. It can delay or censor requests, which replicated aggregators and resubmission mitigate, and the omission of an accepted request is detected when the recipient asks for an inclusion certificate against the certified root. It cannot change or remove a recorded binding. The quorum of the certifier is trusted for liveness and for the uniqueness of the latest root. A quorum that signs two continuations of one root leaves attributable evidence, and no proof system can exclude this. Section~\ref{sec:impl} outlines how a recursive proof over all rounds removes the quorum from the correctness argument for the recorded history.
 
 % =====================================================================
 \section{The Radix Sparse Merkle Tree}\label{sec:rsmt}
@@ -212,7 +218,7 @@ Every finite partial map $M$ is represented by exactly one valid tree, written $
 Write $M_q = \{k \mapsto v \in M \mid q \preceq k\}$. Induction on $|\dom(M)|$: the empty map gives $\Empty$ and a singleton gives its leaf. Otherwise let $p$ be the longest common prefix of $\dom(M)$. The maps $M_{p\cat 0}$ and $M_{p\cat 1}$ are nonempty, have unique valid trees by induction, and $\Node(|p|, p, \Tree(M_{p\cat 0}), \Tree(M_{p\cat 1}))$ is valid. Conversely, Lemma~\ref{lem:shape}(ii) forces the root region of any valid tree for $M$ to be $p$, validity forces its children to represent $M_{p\cat 0}$ and $M_{p\cat 1}$, and induction forces the children.\qed
 \end{proof}
 
-% All later arguments rest on the following lemma about partially opened trees.
+All later arguments depend on the following lemma about partially opened trees.
 
 \begin{definition}[Opening trees]\label{def:opening}
 Opening trees are $\Hole(c)$ with $c \in \{0,1\}^{\lambda}$, $\OLeaf(k,v)$, and
@@ -247,6 +253,17 @@ Let $T = \Tree(M)$ and let a certificate $C$ verify for $k$ against $\dig(T)$.
 \begin{proof}
 (i) $C_\emptyset$ verifies only against $\varnothing$, so $T = \Empty$. Otherwise $\eval(F_C) = \dig(T)$, and Lemma~\ref{lem:match} places $\OLeaf(k',v')$ at a leaf of $T$, so $M(k') = v'$, and places the openings at the junctions of $T$ on the path from the root to that leaf. If $k \in \dom(M)$, the descent for $k$ ends at $\Leaf(k, M(k))$, because by Lemma~\ref{lem:shape}(i) and validity the child that contains this leaf is the one on side $k[d]$. Since $k[d_j] = k'[d_j]$ for all $j$, the same descent passes through the openings and ends at $\Leaf(k',v')$, so $k' = k$. Hence $k' \neq k$ implies $k \notin \dom(M)$. (ii) Record the depth and the sibling digest of every junction passed by the descent for $k$, and the leaf at which the descent ends~\cite{fullversion}.\qed
 \end{proof}
+
+The next statement gives Definition~\ref{def:security}(ii). It holds for every root, not only for digests of valid trees.
+
+\begin{proposition}[Undeniability]\label{prop:undeniable}
+Let two nonempty certificates verify for the same key $k$ against the same root $r \in \{0,1\}^{\lambda}$. If their terminal leaves differ, a collision of $H$ is computable from the two certificates.
+\end{proposition}
+\begin{proof}
+Compare the digest chains $c_m, \ldots, c_0$ and $c'_{m'}, \ldots, c'_0$ of the two certificates from the root downward, starting with $c_m = c'_{m'} = r$. Suppose the current digests are equal. If both are junction digests, their $\NodeHash$ preimages are equal or form a collision. Equal preimages have the same depth $d$, and both chains continue with the child on side $k[d]$, because both terminal keys agree with $k$ at bit $d$. The next digests are therefore equal as well. If one of the current digests is a leaf digest and the other a junction digest, the preimages have different domain tags and form a collision. If both are leaf digests, the two terminal leaves are distinct preimages.\qed
+\end{proof}
+
+Two inclusion certificates for $k$ with different values have different terminal leaves, and so do an inclusion and a non-inclusion certificate for $k$; $C_\emptyset$ verifies only against $\varnothing$.
 
 % =====================================================================
 \section{Single Insertion}\label{sec:single}
@@ -341,7 +358,7 @@ In a certified run the keys $k_1,\ldots,k_n$ are pairwise distinct and, with $M_
 Induction on $i$, with $r_0 = \varnothing = \dig(\Tree(\emptyset))$. If $r_{i-1} = \dig(\Tree(M_{i-1}))$, Theorem~\ref{thm:update} applied to $C_i$ gives $k_i \notin \dom(M_{i-1})$, so $M_i$ is a partial map, and $r_i = \dig(\Tree(M_i))$.\qed
 \end{proof}
 
-The maps $M_i$ are computed from the accepted run itself, which establishes Definition~\ref{def:security}(i) with the consistency proof $\pi_i = (k_i,v_i,C_i)$. Definition~\ref{def:security}(ii) follows by comparing the hash chains of the two certificates from the root downward. The target key fixes the side of the on-path child at every junction, so the chains agree until they end in different leaves, or until one ends in a leaf where the other has a junction. Each of these cases is a collision. The protocol is also complete: for a fresh key, Theorem~\ref{thm:cert}(ii) yields the certificate, and Theorem~\ref{thm:update} guarantees that it leads to the canonical root.
+The maps $M_i$ are computed from the accepted run itself, which establishes Definition~\ref{def:security}(i) with the consistency proof $\pi_i = (k_i,v_i,C_i)$. Definition~\ref{def:security}(ii) is Proposition~\ref{prop:undeniable}. The protocol is also complete: for a fresh key, Theorem~\ref{thm:cert}(ii) yields the certificate, and Theorem~\ref{thm:update} guarantees that it leads to the canonical root.
 
 \begin{corollary}[Add-only]\label{cor:run}
 In a certified run, for $j \le i$ the tree committed by $r_i$ maps $k_j$ to $v_j$, and the overwrite clause of Definition~\ref{def:ins} is never used. A certificate for $k_j$ with a different terminal key that verifies against $r_i$ yields a collision.
@@ -355,7 +372,7 @@ In this section the post-state is $\ins(T;k,v)$, a function of the pre-state. Th
 \section{Batch Insertion}\label{sec:batch}
 % =====================================================================
 
-A batch of $b$ insertions can be certified as $b$ single insertions against $b$ intermediate roots, at the cost of $b$ root-to-leaf certificates. A \emph{transcript} of the part of the post-state tree that the batch touches shares the common parts of these paths and is verified in one pass. It is also the statement that the extended version compresses into a STARK~\cite{fullversion}. The price is that the aggregator now supplies the shape of the touched tree, so the verifier must check that each inserted leaf and each preserved subtree is at the position determined by its keys.
+A batch of $b$ insertions can be certified as $b$ single insertions against $b$ intermediate roots, at the cost of $b$ root-to-leaf certificates. A \emph{transcript} of the part of the post-state tree that the batch touches shares the common parts of these paths and is verified in one pass. Its verifier is also the statement that Sect.~\ref{sec:impl} compresses into a STARK. A complication is that the (untrusted) aggregator now decides the shape of the touched tree, so the verifier must check that each inserted leaf and each preserved subtree is at the position determined by its keys.
 
 The consistency proof of a round consists of the batch $B$ and a transcript $\pi$, the post-order serialization of the touched part of the post-state tree over the alphabet of Table~\ref{tab:lang}. The verifier sorts the batch by key, requires the keys to be strictly increasing, and executes $\pi$ on a stack. A stack entry describes one subtree by a triple: its pre-state digest, its post-state digest, and an \emph{advice} pair $(\delta,\varrho)$, the depth and region of its top node, or $\bot$ if the subtree is opaque. At $N(d)$ the verifier pops the right child $(o_r,n_r,a_r)$ and the left child $(o_l,n_l,a_l)$ and performs three checks.
 \begin{enumerate}
@@ -443,6 +460,40 @@ Leaf $a$ stays opaque because it remains below the pre-existing root junction. L
 Preserving the hashes of the pre-state does not preserve the dictionary. Suppose the junction hash committed to the depth only and the verifier applied only the digest rule. Let $(k,v)$ be recorded under $r_{i-1}$ and pick $d^*$ with $k[d^*] = 1$. The transcript $[S(r_{i-1}), L, N(d^*)]$ with batch $\{(k,v')\}$, $v' \neq v$, passes all digest checks: the pre-state side passes $r_{i-1}$ through, and the post-state side attaches the whole pre-state tree to the $0$-side of a new junction (Fig.~\ref{fig:batch}b). The descent for $k$ under $r_i$ takes the $1$-side, so $(k,v')$ has an inclusion certificate against $r_i$ and $(k,v)$ has none. The spent state $k$ is bound to a second transaction. The verifier above rejects this transcript. Confinement requires the preserved child of the new junction to be opened, and edge coherence then requires the region $\varrho$ of that child to be longer than $d^*$ with $\varrho[d^*] = 0$. This is impossible, because $\varrho$ is a prefix of $k$ and $k[d^*] = 1$.
 \end{remark}
 
+The checks of the verifier are local to one junction. To argue about them by structural induction, we read a transcript as a term.
+
+\begin{definition}[Proof terms]\label{def:pterm}
+Proof terms are $S(c)$, $O(d,p,c_l,c_r)$, $O_L(k,v)$, $L(k,v)$, and $N(d,P_l,P_r)$ with proof terms $P_l$ and $P_r$. The attributes $\Old(P)$, $\New(P)$, and $\Adv(P)$ are the three components of the stack entry in Table~\ref{tab:lang}; at $N(d,P_l,P_r)$ they are computed from the attributes of $P_l$ and $P_r$ as in checks 1 and~3. The predicate $\Ok(P)$ holds if checks 1 and~2 pass at every $N$ of $P$. $P$ \emph{accepts} $(r,r',B)$ if $\Ok(P)$, $\Old(P) = r$, $\New(P) = r'$, and the $L$ leaves of $P$, read from left to right, are the elements of $B$ in strictly increasing order of keys.
+\end{definition}
+
+Every opcode pushes one stack entry, and $N(d)$ first pops two. An accepting run therefore parses $\pi$ uniquely as the post-order serialization of a proof term whose $L$ leaves are the batch elements, and the entries it pushes are the attributes of the subterms. Hence the verifier accepts $(\pi, r_{i-1}, r_i, B)$ iff $\pi$ serializes a proof term that accepts $(r_{i-1}, r_i, B)$.
+
+\begin{lemma}[Old projection]\label{lem:proj}
+For a proof term $P$ with $\Ok(P)$, the \emph{old projection} $P^{\circ}$ is an opening tree or \emph{void}. It is defined by $S(c)^{\circ} = \Hole(c)$, $O_L(k,v)^{\circ} = \OLeaf(k,v)$, $O(d,p,c_l,c_r)^{\circ} = \ONode(d,p,\Hole(c_l),\Hole(c_r))$, and $L(k,v)^{\circ} = \text{void}$. For $P = N(d,P_l,P_r)$ with region $p$, $P^{\circ}$ is void if both $P_l^{\circ}$ and $P_r^{\circ}$ are void, it is the projection of the other child if exactly one of them is void, and it is $\ONode(d,p,P_l^{\circ},P_r^{\circ})$ otherwise. Then $P^{\circ}$ is void iff $\Old(P) = \varnothing$, and otherwise $\eval(P^{\circ}) = \Old(P)$.
+\end{lemma}
+\begin{proof}
+Induction on $P$. The claim is immediate for $S$, $O$, $O_L$, and $L$. At $N$, the three cases of the projection are the three cases of the pre-state digest in check~3.\qed
+\end{proof}
+
+\begin{lemma}[Reconstruction]\label{lem:graft}
+Let $T$ be a valid tree and let a proof term $P$ accept $(\dig(T), r', B)$. Then there is a valid tree $T'$ with $\dig(T') = r'$ and $\map(T') = \map(T) \uplus B$. In particular, no key of $B$ is in $\dom(\map(T))$.
+\end{lemma}
+\begin{proof}
+We first assign a subtree of $T$ to every digest operand of $P$. If $T = \Empty$, then $\Old(P) = \varnothing$ and $P$ contains no $S$, $O$, or $O_L$, because by check~3 a pre-state digest other than $\varnothing$ is never mapped to $\varnothing$ further up. Otherwise $\eval(P^{\circ}) = \dig(T)$ by Lemma~\ref{lem:proj}, and Lemma~\ref{lem:match} matches $P^{\circ}$ with $T$. Every $O$ and $O_L$ of $P$ then coincides with a node of $T$, every $N$ of $P$ with two pre-state digests other than $\varnothing$ coincides with a junction of $T$ of the same depth and region, and every hole, which is the operand of an $S$ or a child digest of an $O$, is at the position of a subtree of $T$ with that digest. We assign this subtree to the hole.
+
+The tree $\Graft(P)$ is defined by structural recursion. An $S$ becomes its assigned subtree, $O(d,p,\cdot,\cdot)$ becomes $\Node(d,p,\cdot,\cdot)$ over its two assigned subtrees, $O_L(k,v)$ and $L(k,v)$ become $\Leaf(k,v)$, and $N(d,P_l,P_r)$ with region $p$ becomes the junction of depth $d$ and region $p$ over $\Graft(P_l)$ and $\Graft(P_r)$. Let $T' = \Graft(P)$. By induction, $\dig(\Graft(Q)) = \New(Q)$ for every subterm $Q$, so $\dig(T') = r'$. Also by construction, if $\Adv(Q) = (\delta,\varrho)$, then the top node of $\Graft(Q)$ has depth $\delta$ and region $\varrho$.
+
+\emph{Validity.} Every subterm is grafted to a nonempty tree, so every junction of $T'$ has two nonempty children. The edges of $T'$ are of three kinds.
+(a)~The edges inside an assigned subtree and the two edges below the graft of an $O$ are edges of $T$, because the matching identifies the $O$ with a junction of $T$ whose children are the assigned subtrees.
+(b)~An edge from the graft of some $N$ to the graft of an $S$. The $S$ carries no advice, so by confinement both pre-state digests at this $N$ differ from $\varnothing$. The $N$ therefore appears in $P^{\circ}$ as an $\ONode$ with the hole of the $S$ below it, and the matching identifies it with a junction of $T$ whose child on that side is the assigned subtree. This is again an edge of $T$.
+(c)~Every other edge leads from the graft of some $N(d,\cdot,\cdot)$ with region $p$ to the graft of a child on side $\beta$ with advice $(\delta,\varrho)$. Edge coherence gives $\delta > d$ and $p \cat \beta \preceq \varrho$, and $(\delta,\varrho)$ are the depth and region of the child.
+The edges of $T$ satisfy the conditions of Definition~\ref{def:tree} because $T$ is valid, and the edges of kind (c) satisfy them by the checks. Hence $T'$ is valid.
+
+\emph{Map.} The leaves of $T'$ are the leaves of the assigned subtrees, the $O_L$ leaves, and the $L$ leaves. By Lemma~\ref{lem:match}, replacing every hole of $P^{\circ}$ by its assigned subtree gives $T$, so the first two groups are exactly the leaves of $T$. The $L$ leaves are the elements of $B$. All leaf keys of the valid tree $T'$ are distinct by Lemma~\ref{lem:shape}(i). Hence the keys of $B$ are absent from $\map(T)$ and $\map(T') = \map(T) \uplus B$.\qed
+\end{proof}
+
+The proof uses each check once. The digest rule yields the matching with the pre-state and the digest of $T'$. Confinement makes every edge above an opaque subtree an edge of the pre-state. Edge coherence validates the remaining edges, which are the ones created in this round.
+
 \begin{definition}[Certified history]\label{def:history}
 A \emph{certified history} is a sequence of tuples $(B_i,\pi_i,r_i)$ for $i = 1,\ldots,n$
 with $r_0 = \varnothing$ such that the verifier accepts $(\pi_i, r_{i-1}, r_i, B_i)$ for every $i$.
@@ -454,9 +505,11 @@ $r_i = \dig(\Tree(M_i))$ for all $i$.
 \begin{theorem}[History soundness]\label{thm:history}
 Every certified history is append-only consistent.
 \end{theorem}
-\begin{proof}[outline]
-By induction on rounds it suffices to show the following for one round: if $T$ is a valid tree with $\dig(T) = r_{i-1}$ and the verifier accepts $(\pi, r_{i-1}, r_i, B)$, then there is a valid tree $T'$ with $\dig(T') = r_i$ and $\map(T') = \map(T) \uplus B$. Proposition~\ref{prop:unique} then gives $T' = \Tree(M_i)$. The argument has three steps~\cite{fullversion}. (1)~An accepted transcript is the post-order serialization of a unique proof term, on which the three checks become a local predicate. (2)~Removing the $L$ leaves and collapsing the new junctions turns the term into an opening tree that evaluates to $r_{i-1}$, so Lemma~\ref{lem:match} places every $S$, $O$, and $O_L$ in $T$. (3)~Grafting the matched subtrees of $T$ into the term yields $T'$ with $\dig(T') = r_i$. Every edge of $T'$ is either an edge of $T$ or has an advised child that passed the coherence check; confinement excludes an opaque subtree under a new junction. Thus $T'$ is valid, its leaf keys are distinct by Lemma~\ref{lem:shape}(i), the keys of $B$ are fresh, and $\map(T') = \map(T) \uplus B$.\qed
+\begin{proof}
+Induction on $i$, with $r_0 = \varnothing = \dig(\Tree(M_0))$. Let $r_{i-1} = \dig(\Tree(M_{i-1}))$. The accepted transcript $\pi_i$ serializes a proof term that accepts $(r_{i-1}, r_i, B_i)$. Lemma~\ref{lem:graft}, applied to $T = \Tree(M_{i-1})$, yields a valid tree $T'$ with $\dig(T') = r_i$ and $\map(T') = M_{i-1} \uplus B_i$. The disjoint union that defines $M_i$ therefore exists, and $T' = \Tree(M_i)$ by Proposition~\ref{prop:unique}.\qed
 \end{proof}
+
+Theorem~\ref{thm:history} establishes Definition~\ref{def:security}(i) for the consistency proof $(B_i,\pi_i)$, with the unions of the batches as the maps $M_i$.
 
 \begin{theorem}[Completeness]\label{thm:complete}
 For a valid tree $T$ and a batch $B$ of distinct keys absent from $\map(T)$, a transcript that the verifier accepts for $(\dig(T), \dig(\Tree(\map(T) \uplus B)), B)$ is computable from $T$ in time linear in its length, after sorting $B$.
@@ -467,18 +520,71 @@ In a certified history: (i) inclusion certificates for $(k,v)$ against $r_i$ and
 \end{corollary}
 
 % =====================================================================
-\section{Implementation}\label{sec:impl}
+\section{Implementation and Evaluation}\label{sec:impl}
 % =====================================================================
 
-Reference implementations of the tree and of both verifiers, optimized for readability, are available in Python~\cite{ndsmtexp}. The production aggregator is written in Rust and can keep the RSMT on disk~\cite{rugregator}. At $10^6$ leaves, the transcript and the batch together take about 320 bytes per insertion. With the plain transcript the Consensus Layer therefore receives data in proportion to the transaction rate, which eventually becomes the scaling bottleneck. A custom AIR on the Plonky3 STARK toolkit~\cite{plonky3,rsmtair} removes it. The AIR proves the verifier of Sect.~\ref{sec:batch} with the batch and the transcript as witness and $(r_{i-1}, r_i)$ as public input. With Poseidon2 as the tree hash, one consumer CPU proves more than $10^4$ insertions per second per shard, and a proof of about 1.8\,MB verifies in under 50\,ms, independently of the batch size. The proof is used for computational integrity and not for privacy. The proved statement contains no transaction execution, which keeps the prover remarkably lightweight.
+Reference implementations of the tree and of both verifiers, optimized for readability, are available in Python~\cite{ndsmtexp}. The production aggregator is written in Rust and can keep the RSMT on disk~\cite{rugregator}.
 
-Throughput scales horizontally by sharding. A key prefix selects the shard; a shard can be split during operation without rehashing, because the root of each child shard is an existing subtree. The extended version~\cite{fullversion} describes the AIR, the sharding scheme, and the recursive STARK over all rounds, which gives a constant-size proof that the entire certified history is correct.
+\paragraph{Certificates and transcripts.}
+Table~\ref{tab:eval} compares the consistency proofs for a round of $b$ insertions of uniformly random keys into a tree of $10^6$ leaves, with 32-byte keys, values, and digests. A certificate has about 20 openings at this size. Certifying the round by single insertions (Sect.~\ref{sec:single}) therefore costs about 0.78\,kB and 42 hash invocations per insertion for every $b$: the verifier evaluates the certificate once against the old root and once, as $C^{+}$, for the new one. The transcript contains the shared upper part of the paths only once. Its cost per insertion falls from 0.83\,kB and 43 hash invocations at $b = 1$ to 0.32\,kB and 16 hash invocations at $b = 8192$, which is about one junction less for every doubling of $b$.
+
+\begin{table}[t]
+\centering
+\caption{Consistency proofs for a round of $b$ insertions into a tree of $10^6$ leaves. Bytes and hash invocations of the verifier are given per insertion and include the batch. The STARK columns refer to one proof for the whole round: the time for proving, including witness generation, the time for verification, and the size of the proof, on a low-end CPU.}\label{tab:eval}
+\footnotesize
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{@{}r rr rr rrr@{}}
+\toprule
+ & \multicolumn{2}{c}{Certificates} & \multicolumn{2}{c}{Transcript} & \multicolumn{3}{c}{STARK} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(l){6-8}
+$b$ & bytes & hashes & bytes & hashes & prove (s) & verify (ms) & proof (MB) \\
+\midrule
+1    & 788 & 43 & 832 & 43   & --   & -- & --  \\
+256  & 773 & 42 & 497 & 25.7 & 0.17 & 22 & 2.0 \\
+1024 & 776 & 42 & 430 & 21.8 & 0.53 & 29 & 2.1 \\
+3584 & 772 & 42 & 365 & 18.2 & 1.10 & 41 & 2.1 \\
+8192 & 776 & 42 & 324 & 15.8 & --   & -- & --  \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{STARK.}
+A custom AIR on the Plonky3 toolkit~\cite{plonky3,rsmtair} proves the execution of the verifier of Sect.~\ref{sec:batch}, with $(r_{i-1}, r_i)$ as public input and the batch and the transcript as witness. The tree hash is Poseidon2 in this setting. The proof is used for computational integrity and not for privacy, and the proved statement contains no transaction execution. The proofs of Table~\ref{tab:eval} use Blake3 for the commitments of the proof system and parameters for about 116 bits of conjectured security. They were measured on an 6-core AMD Ryzen 5 3600 (2021). A proof takes about 2\,MB and is verified in 22 to 41\,ms. The work of the prover is dominated by the Poseidon2 permutations of the tree hash. An insertion into an empty tree needs 5 permutations, and an insertion into the tree of $10^6$ leaves needs 30 to 42, because the junctions between the root and the new leaf are hashed for both states. The throughput of the prover therefore depends on the size of the tree (logarithmically): the same machine proves about 3300 insertions per second into the tree of $10^6$ leaves, and about 17000 per second into an empty tree.
+% NOTE (review): measured 2026-11-10 with rsmt-air commit ced916c (github.com/ristik/rsmt-air),
+% AMD Ryzen 5 3600 (6 cores, 12 threads), Ubuntu 24.04, RUSTFLAGS="-C target-cpu=native",
+% medians of 5 runs, spread below 3 percent:
+%   rsmt-bench perf --prefill 1000000 --batches 256,1024,3584 --hash blake3
+%   (default FRI: --log-blowup 1 --num-queries 100 --query-pow-bits 16)
+%   batch  witness  prove   verify  proof     permutations/insertion
+%    256    19 ms   148 ms  22 ms   1.99 MB   42.2
+%   1024    59 ms   466 ms  29 ms   2.06 MB   36.0
+%   3584   184 ms   917 ms  41 ms   2.13 MB   30.5
+% Empty tree (--prefill 0): 4096: 33 + 226 ms, verify 22 ms, 1.88 MB; 8192: 67 + 421 ms, 25 ms, 1.90 MB.
+% Frozen R3 parameters (--log-blowup 2 --num-queries 64 --query-pow-bits 0, 128 bits conjectured)
+% at 10^6 leaves: 3584: 185 + 1429 ms, verify 54 ms, 1.42 MB; 1024: 60 + 703 ms, 34 ms, 1.37 MB.
+% Poseidon2 commitments (needed for recursion in a STARK) cost about 8 percent more prover time.
+% Without target-cpu=native the prover is 1.6 times slower (Blake3) or 3.4 times slower (Poseidon2).
+% The timings of the extended version (M1 Pro: 4096 in 143 ms) are for the empty tree
+% ("fresh-batch workload", --prefill 0). The earlier claim "more than 10^4 insertions per second
+% per shard" is not reached at 10^6 leaves on this machine.
+% Bytes and hashes: rsmt6a.py with SHA-256, encoding of 1 byte per opcode and depth,
+% ceil(d/8) bytes per region, 32 bytes per digest, key, and value.
+% The limit of 2^16 opcodes per proof (frozen N_max) is also present in commit ced916c.
+One proof covers at most $2^{16}$ opcodes, which is about 3800 insertions at this tree size, and a larger round is split into several proofs.
+
+The size parity of raw transcript and STARK (given the FRI parameters) is achieved at the batch size of around 4000 new leaves. Beyond scaling, this unlocks proof composition: the statement of the STARK is the pair $(r_{i-1}, r_i)$; the proofs of many rounds and many shards can be verified inside one further proof.
+
+\paragraph{Sharding.}
+Throughput scales horizontally by sharding. A key prefix selects the shard, and a shard can be split during operation without rehashing, because depth and region are absolute and the root of each child shard is an existing subtree.
+
+\paragraph{Auditing the full history.}
+With one proof per round, a recipient relies on the quorum of the certifier for the fact that every consistency proof was verified. A recursive proof removes this reliance~\cite{fullversion}. Its statement for $n$ rounds says that, starting from the empty dictionary, every round $i \le n$ has a consistency proof that verifies against $(r_{i-1},r_i)$, and that an append-only commitment $D_n$ contains exactly $(1,r_1),\ldots,(n,r_n)$. The proof for $n$ rounds verifies the proof for an earlier round and the STARKs of the rounds added since~\cite{valiant2008ivc}. It therefore has constant size, and because the statement has no secret input, any party that mirrors the published round proofs can extend it. A recipient verifies the latest such proof and, for every certificate in the history of a token, the membership of its root in $D_n$. By Theorem~\ref{thm:history}, under collision resistance and the soundness of the two proof systems, every root on the proven history is then the digest of an add-only extension of its predecessor, with no assumption about the certifier. The quorum remains trusted only for liveness and for the uniqueness of the latest root. The extended version specifies the statement for the sharded dictionary and estimates the cost of an instantiation on a zkVM.
 
 % =====================================================================
 \section{Related Work}\label{sec:related}
 % =====================================================================
 
-Certificate Transparency~\cite{rfc6962} provides consistency proofs between successive heads of a chronological Merkle log. A log has no key-determined positions, so its consistency proof does not exclude a second entry for the same key, whereas in a keyed dictionary a double-spend is a key collision. Buldas, Laud, and Lipmaa~\cite{buldas2000} introduced authenticated search trees with undeniable attestations, for which contradictory answers about one key cannot both verify against one digest; Definition~\ref{def:security}(ii) is this property. Reyzin et al.~\cite{reyzin2017} give authenticated dynamic dictionaries for cryptocurrencies in which the verifier computes the new digest from a proof against the old one, also for batches of operations. Section~\ref{sec:single} is the counterpart for a radix tree, whose shape is determined by the set of keys and not by the order of insertions. Append-only authenticated dictionaries by Tomescu et al.~\cite{tomescu2019} use bilinear accumulators and require a trusted setup, whereas our tree is hash-only.
+Certificate Transparency~\cite{rfc6962} provides consistency proofs between successive heads of a chronological Merkle log. A log has no key-determined positions, so its consistency proof does not exclude a second entry for the same key, whereas in a keyed dictionary a double-spend is a key collision. Buldas, Laud, and Lipmaa~\cite{buldas2000} introduced authenticated search trees with undeniable attestations, for which contradictory answers about one key cannot both verify against one digest; Definition~\ref{def:security}(ii) is this property. Reyzin et al.~\cite{reyzin2017} give authenticated dynamic dictionaries for cryptocurrencies in which the verifier computes the new digest from a proof against the old one, also for batches of operations. Section~\ref{sec:single} is the counterpart for a radix tree, whose shape is determined by the set of keys and not by the order of insertions.
 
 Zerocash~\cite{zerocash} and its descendants keep a nullifier set on a blockchain, and validity rollups prove the execution of all transactions of a block. Both put execution or user secrets into the proved statement, whereas our consistency proof covers only the dictionary update. Client-side validated tokens such as RGB~\cite{rgb} share the off-chain execution model, but each transfer closes a single-use seal by a transaction of its sender on the base chain, whose block space then bounds the throughput. To our knowledge, Unicity is the only peer-to-peer transaction system that aggregates the transfers of unrelated users into one root and one proof of constant size per round, which decouples its throughput from the capacity of the consensus layer.
 
@@ -493,7 +599,6 @@ The online component of a trustless peer-to-peer token system can be a minimalis
 \begin{credits}
 \subsubsection{\discintname}
 The authors have no competing interests to declare that are relevant to the content of this article.
-% Also, AI use statement?
 \end{credits}
 
 \bibliographystyle{splncs04}
